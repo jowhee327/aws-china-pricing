@@ -1,0 +1,36 @@
+# AWS 中国区折扣配置
+# 未配置折扣时，脚本将使用 list price 并提醒用户配置折扣
+
+# EDP (Enterprise Discount Program) — 全账单折扣
+# 通常范围: 3% - 15%
+edp:
+  enabled: false
+  discount_pct: 0  # 百分比，例如 8 表示 8% 折扣
+  # 备注: EDP 折扣适用于所有 AWS 服务的总费用
+
+# PPA (Private Pricing Addendum) — 按服务/实例族的私有折扣
+# 可以为不同服务或实例族配置不同折扣率
+ppa:
+  enabled: false
+  rules: []
+  # 示例配置:
+  # rules:
+  #   - service: AmazonEC2
+  #     instance_family: c6i    # 可选，不填则对整个服务生效
+  #     discount_pct: 10
+  #   - service: AmazonRDS
+  #     discount_pct: 5
+  #   - service: AmazonS3
+  #     discount_pct: 3
+
+# 折扣叠加顺序（先应用的排前面）
+# 可选值: edp, ppa
+# 默认: 先 PPA 再 EDP（即 PPA 折后价再打 EDP 折扣）
+discount_stack_order:
+  - ppa
+  - edp
+
+# 增值税配置
+tax:
+  vat_rate: 6  # 中国区云服务增值税率 6%
+  include_tax: false  # 默认不含税，生成报价单时可通过 --include-tax 开启

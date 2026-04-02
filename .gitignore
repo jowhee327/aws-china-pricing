@@ -1,0 +1,17 @@
+# Price cache data (auto-generated, large files)
+data/cache/
+data/index/
+data/versions.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
