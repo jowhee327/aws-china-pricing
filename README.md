@@ -6,6 +6,7 @@ An OpenClaw Skill for querying AWS China region pricing, calculating costs, and 
 
 ## Features
 
+- **Smart Import** — Natural language service descriptions auto-mapped to AWS service codes (80+ rules)
 - **Real-time Price Query** — Query any service via AWS Price List API
 - **Full RI Coverage** — Standard & Convertible RI, 1yr/3yr, No/Partial/All Upfront (12 combinations)
 - **Savings Plans** — Compute SP + EC2 Instance SP pricing and comparison
@@ -46,6 +47,32 @@ region = cn-north-1
 > **Note**: The Pricing API endpoint is in `cn-northwest-1`, but works with credentials from either China region.
 
 ## Quick Start
+
+### 0. Smart Import (Natural Language Input)
+
+Don't know the exact AWS service codes? Just describe what you need:
+
+```csv
+类型,规格,数量,备注
+计算,8C16G,20,Web服务器
+MySQL数据库,4C32G,2,业务库
+Redis缓存,4G内存,3,Session缓存
+对象存储,1TB,,文件存储
+Kafka消息队列,,2,异步消息
+```
+
+```bash
+# Convert to standardized format
+python3 scripts/smart_import.py --input raw_workload.csv --output standardized.csv --region cn-north-1
+
+# Or directly calculate costs
+python3 scripts/smart_import.py --input raw_workload.csv --region cn-north-1 --calculate
+```
+
+Supports 80+ mapping rules covering all 95 China region services in Chinese/English, with auto-detection of:
+- Engine type: "MySQL" → `engine=MySQL`, "Redis" → `engine=Redis`
+- Instance specs: "8C16G" → `vCPU=8, memory=16` → recommends best-fit instance
+- Storage sizes: "1TB" → `storage_gb=1024`
 
 ### 1. Query a Single Service
 
@@ -168,6 +195,7 @@ aws-china-pricing/
 ├── SKILL.md                    # OpenClaw skill entry point
 ├── discount-config.yaml        # EDP/PPA discount configuration
 ├── scripts/
+│   ├── smart_import.py         # Natural language → AWS service mapping
 │   ├── query_price.py          # Core pricing query (API + cache fallback)
 │   ├── calculate_cost.py       # Batch cost calculation engine
 │   ├── update_prices.py        # Price data updater (Bulk API + indexing)

@@ -6,6 +6,7 @@
 
 ## 功能特性
 
+- **智能导入** — 自然语言服务描述自动映射为 AWS ServiceCode（80+ 条规则）
 - **实时价格查询** — 通过 AWS Price List API 查询任意服务定价
 - **完整 RI 覆盖** — Standard & Convertible RI，1年/3年期，无预付/部分预付/全预付（12 种组合）
 - **Savings Plans** — Compute SP + EC2 Instance SP 定价及对比
@@ -46,6 +47,32 @@ region = cn-north-1
 > **说明**: Pricing API 的 endpoint 在 `cn-northwest-1`，但使用任一中国区域的凭证即可。
 
 ## 快速开始
+
+### 0. 智能导入（自然语言输入）
+
+不需要知道精确的 AWS ServiceCode，直接描述你的需求：
+
+```csv
+类型,规格,数量,备注
+计算,8C16G,20,Web服务器
+MySQL数据库,4C32G,2,业务库
+Redis缓存,4G内存,3,Session缓存
+对象存储,1TB,,文件存储
+Kafka消息队列,,2,异步消息
+```
+
+```bash
+# 转换为标准格式
+python3 scripts/smart_import.py --input raw_workload.csv --output standardized.csv --region cn-north-1
+
+# 或直接计算成本
+python3 scripts/smart_import.py --input raw_workload.csv --region cn-north-1 --calculate
+```
+
+支持 80+ 条映射规则，覆盖全部 95 个中国区服务，自动识别：
+- 引擎类型：“MySQL” → engine=MySQL，“Redis” → engine=Redis
+- 实例规格：“8C16G” → vCPU=8, memory=16 → 自动推荐最优实例
+- 存储容量：“1TB” → storage_gb=1024
 
 ### 1. 查询单个服务价格
 
@@ -168,6 +195,7 @@ aws-china-pricing/
 ├── SKILL.md                    # OpenClaw Skill 入口
 ├── discount-config.yaml        # EDP/PPA 折扣配置
 ├── scripts/
+│   ├── smart_import.py         # 智能导入（自然语言 → AWS 服务映射）
 │   ├── query_price.py          # 核心查价（API + 缓存降级）
 │   ├── calculate_cost.py       # 批量成本计算引擎
 │   ├── update_prices.py        # 价格数据更新（Bulk API + 索引）
