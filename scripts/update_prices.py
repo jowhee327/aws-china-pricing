@@ -238,7 +238,6 @@ def main():
                        help="目标区域 (默认: cn-north-1)")
     parser.add_argument("--profile", default=None,
                        help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
-                       help="区域代码 (默认: cn-north-1)")
     parser.add_argument("--services", "-s", help="指定服务（逗号分隔），不指定则更新所有")
     parser.add_argument("--force", "-f", action="store_true", help="强制更新（忽略版本检查）")
     parser.add_argument("--list-versions", action="store_true", help="列出本地缓存版本")

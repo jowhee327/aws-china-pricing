@@ -473,7 +473,7 @@ def main():
                        help="折扣配置文件路径")
     parser.add_argument("--output", "-o", help="输出 CSV 文件路径")
     parser.add_argument("--compare", "-c", help="多方案对比，逗号分隔的计费模式")
-    parser.add_argument("--include-tax", action="store_true", help="含 6% 增值税")
+    parser.add_argument("--include-tax", action="store_true", help="含 6%% 增值税")
     parser.add_argument("--json", action="store_true", help="JSON 格式输出")
     args = parser.parse_args()
 

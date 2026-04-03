@@ -244,7 +244,7 @@ def main():
     parser.add_argument("--discount-config", "-d",
                        default=str(SCRIPT_DIR.parent / "discount-config.yaml"),
                        help="折扣配置文件路径")
-    parser.add_argument("--include-tax", action="store_true", help="含 6% 增值税")
+    parser.add_argument("--include-tax", action="store_true", help="含 6%% 增值税")
     parser.add_argument("--compare", "-c", help="对比计费模式（逗号分隔）")
     args = parser.parse_args()
 
