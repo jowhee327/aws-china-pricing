@@ -24,7 +24,7 @@ CACHE_DIR = DATA_DIR / "cache"
 INDEX_DIR = DATA_DIR / "index"
 VERSION_FILE = DATA_DIR / "versions.json"
 
-AWS_PROFILE = "cn-north-1"
+AWS_PROFILE = os.environ.get("AWS_PROFILE", "default")
 PRICING_REGION = "cn-northwest-1"
 
 
@@ -235,6 +235,9 @@ def update_service(service: str, region: str, versions: dict, force: bool = Fals
 def main():
     parser = argparse.ArgumentParser(description="AWS 中国区价格数据更新工具")
     parser.add_argument("--region", "-r", default="cn-north-1",
+                       help="目标区域 (默认: cn-north-1)")
+    parser.add_argument("--profile", default=None,
+                       help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
                        help="区域代码 (默认: cn-north-1)")
     parser.add_argument("--services", "-s", help="指定服务（逗号分隔），不指定则更新所有")
     parser.add_argument("--force", "-f", action="store_true", help="强制更新（忽略版本检查）")
@@ -242,6 +245,11 @@ def main():
     parser.add_argument("--list-services", action="store_true", help="列出所有可用服务")
     parser.add_argument("--index-only", help="仅从已有缓存构建索引（指定缓存文件路径）")
     args = parser.parse_args()
+
+    # 设置 profile
+    global AWS_PROFILE
+    if args.profile:
+        AWS_PROFILE = args.profile
 
     # 确保目录存在
     CACHE_DIR.mkdir(parents=True, exist_ok=True)

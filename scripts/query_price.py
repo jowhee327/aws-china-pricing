@@ -30,8 +30,26 @@ DATA_DIR = SCRIPT_DIR.parent / "data"
 CACHE_DIR = DATA_DIR / "cache"
 INDEX_DIR = DATA_DIR / "index"
 
-AWS_PROFILE = "cn-north-1"
+AWS_PROFILE = os.environ.get("AWS_PROFILE", "default")
 PRICING_REGION = "cn-northwest-1"
+
+# 服务定价区域映射：某些服务只在特定区域有价格数据
+REGION_OVERRIDE = {
+    # 仅北京区有价格
+    "AWSCodeCommit": "cn-north-1",
+    "AWSGreengrass": "cn-north-1",
+    "AWSIoTAnalytics": "cn-north-1",
+    "AWSIoTEvents": "cn-north-1",
+    "AWSIoTSiteWise": "cn-north-1",
+    "AmazonKinesisVideo": "cn-north-1",
+    "AmazonPersonalize": "cn-north-1",
+    "AmazonQuickSight": "cn-north-1",
+    # 仅宁夏区有价格
+    "AWSCostExplorer": "cn-northwest-1",
+    "AWSElementalMediaConvert": "cn-northwest-1",
+    "AmazonPolly": "cn-northwest-1",
+    "AmazonWorkSpaces": "cn-northwest-1",
+}
 
 # EC2 默认过滤器（查询实例价格时补全常用默认值）
 EC2_DEFAULT_FILTERS = {
@@ -58,9 +76,10 @@ RI_TERM_MAP = {
 }
 
 
-def run_aws_cli(args: list[str], timeout: int = 30) -> Optional[dict]:
+def run_aws_cli(args: list[str], timeout: int = 30, profile: str = None) -> Optional[dict]:
     """执行 AWS CLI 命令并返回 JSON 结果"""
-    cmd = ["aws"] + args + ["--region", PRICING_REGION, "--profile", AWS_PROFILE, "--output", "json"]
+    _profile = profile or AWS_PROFILE
+    cmd = ["aws"] + args + ["--region", PRICING_REGION, "--profile", _profile, "--output", "json"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
@@ -577,6 +596,8 @@ def main():
     parser.add_argument("--region", "-r", default="cn-north-1",
                        choices=["cn-north-1", "cn-northwest-1", "cn-north-1-pkx-1"],
                        help="区域代码 (默认: cn-north-1)")
+    parser.add_argument("--profile", default=None,
+                       help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
     parser.add_argument("--filters", "-f", nargs="*", default=[],
                        help="过滤器 key=value 格式 (如 instanceType=c6i.xlarge)")
     parser.add_argument("--list-services", action="store_true", help="列出所有可用服务")
@@ -586,6 +607,11 @@ def main():
     parser.add_argument("--max-results", "-n", type=int, default=5, help="最大返回条数 (默认: 5)")
     parser.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     args = parser.parse_args()
+
+    # 设置 profile
+    global AWS_PROFILE
+    if args.profile:
+        AWS_PROFILE = args.profile
 
     # 列出服务
     if args.list_services:
@@ -611,23 +637,31 @@ def main():
         else:
             print(f"[WARN] 忽略无效过滤器: {f}", file=sys.stderr)
 
+    # 区域映射：某些服务只在特定区域有价格
+    query_region = args.region
+    if args.service in REGION_OVERRIDE:
+        override_region = REGION_OVERRIDE[args.service]
+        if override_region != args.region:
+            print(f"⚠️ {args.service} 统一按 {override_region} 计价（该服务仅在此区域有价格数据）", file=sys.stderr)
+            query_region = override_region
+
     # 数据源 1: Query API
-    print(f"正在查询 {args.service} @ {args.region} ...", file=sys.stderr)
-    products = query_api(args.service, args.region, user_filters, max_results=args.max_results)
+    print(f"正在查询 {args.service} @ {query_region} ...", file=sys.stderr)
+    products = query_api(args.service, query_region, user_filters, max_results=args.max_results)
 
     # 数据源 2: 本地缓存降级
     if not products:
         print("[INFO] API 查询无结果，尝试本地缓存...", file=sys.stderr)
-        products = query_cache(args.service, args.region, user_filters)
+        products = query_cache(args.service, query_region, user_filters)
 
     if not products:
-        print(f"\n未找到 {args.service} 在 {args.region} 的匹配价格数据。", file=sys.stderr)
+        print(f"\n未找到 {args.service} 在 {query_region} 的匹配价格数据。", file=sys.stderr)
         print("请检查:", file=sys.stderr)
         print(f"  1. 服务代码是否正确（使用 --list-services 查看）", file=sys.stderr)
         print(f"  2. 过滤器是否正确", file=sys.stderr)
-        print(f"  3. 该服务是否在 {args.region} 可用", file=sys.stderr)
+        print(f"  3. 该服务是否在 {query_region} 可用", file=sys.stderr)
         print(f"\n建议运行以下命令更新本地缓存:", file=sys.stderr)
-        print(f"  python3 {SCRIPT_DIR}/update_prices.py --region {args.region} --services {args.service}",
+        print(f"  python3 {SCRIPT_DIR}/update_prices.py --region {query_region} --services {args.service}",
               file=sys.stderr)
         sys.exit(1)
 
@@ -641,7 +675,7 @@ def main():
         instance_type = user_filters.get("instanceType", "")
         if args.service == "AmazonEC2" and instance_type:
             print(f"正在查询 Savings Plans ...", file=sys.stderr)
-            sp_data = query_savings_plans(args.region, instance_type)
+            sp_data = query_savings_plans(query_region, instance_type)
             if not sp_data:
                 print("[INFO] 未找到 SP 数据，请先运行 update_prices.py 下载 SP 缓存", file=sys.stderr)
 
