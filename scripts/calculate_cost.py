@@ -184,7 +184,7 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
                        include_tax: bool = False) -> dict:
     """计算单个条目的成本"""
     quantity = int(item.get("quantity", 1) or 1)
-    usage_hours = float(item.get("usage_hours", 730) or 730)
+    usage_hours = float(item.get("usage_hours", 720) or 720)
     billing_mode = item.get("billing_mode", "on-demand") or "on-demand"
     service = item.get("service", "")
     instance_type = item.get("instance_type", "")
@@ -198,6 +198,7 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
         "usage_hours": usage_hours,
         "billing_mode": billing_mode,
         "notes": item.get("notes", ""),
+        "original_request": item.get("original_request", ""),
         "currency": price_data.get("currency", "CNY"),
     }
 
@@ -300,7 +301,7 @@ def save_csv(results: list[dict], output_path: str):
         "service", "instance_type", "region", "quantity", "usage_hours",
         "billing_mode", "currency", "hourly_list", "hourly_after_discount",
         "monthly_per_unit", "monthly_total", "upfront_total", "yearly_total",
-        "applied_discounts", "notes", "warning",
+        "applied_discounts", "notes", "original_request", "warning",
     ]
 
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -528,6 +529,7 @@ def main():
                 "warning": "未找到价格数据",
                 "applied_discounts": [],
                 "notes": item.get("notes", ""),
+                "original_request": item.get("original_request", ""),
                 "currency": "CNY",
             })
             continue

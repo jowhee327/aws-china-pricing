@@ -50,7 +50,7 @@ THIN_BORDER = Border(
     top=Side(style="thin", color="CCCCCC"),
     bottom=Side(style="thin", color="CCCCCC"),
 )
-CNY_FORMAT = '#,##0.00 "CNY"'
+CNY_FORMAT = '#,##0.00'
 
 
 def set_col_widths(ws, widths: list):
@@ -126,10 +126,10 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
     expire_date = quote_date + timedelta(days=validity)
     quote_no = f"AWS-CN-{quote_date.strftime('%Y%m%d')}-{abs(hash(customer)) % 10000:04d}"
 
-    set_col_widths(ws, [5, 15, 18, 16, 8, 10, 25, 14, 16, 16, 16, 14, 20])
+    set_col_widths(ws, [5, 15, 18, 16, 8, 10, 25, 14, 16, 16, 16, 14, 20, 25])
 
     # 标题区
-    ws.merge_cells("A1:M1")
+    ws.merge_cells("A1:N1")
     cell = ws.cell(row=1, column=1, value="AWS 中国区云服务报价单")
     cell.font = TITLE_FONT
     cell.alignment = Alignment(horizontal="center")
@@ -137,8 +137,8 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
 
     info_rows = [
         ("报价编号:", quote_no, "客户名称:", customer),
-        ("报价日期:", quote_date.strftime("%Y-%m-%d"), "有效期至:", expire_date.strftime("%Y-%m-%d")),
-        ("税费说明:", f"{'含税 (6% 增值税)' if include_tax else '不含税'}", "货币:", "CNY (人民币)"),
+        ("报价日期:", quote_date.strftime("%Y-%m-%d"), "货币:", "CNY (人民币)"),
+        ("税费说明:", f"{'含税 (6% 增值税)' if include_tax else '不含税'}", "", ""),
     ]
     for i, (l1, v1, l2, v2) in enumerate(info_rows, 3):
         ws.cell(row=i, column=1, value=l1).font = BOLD_FONT
@@ -153,7 +153,7 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
     headers = [
         "序号", "服务", "实例类型", "区域", "数量", "月使用时长(h)",
         "计费模式", "小时单价(CNY)", "月费/台(CNY)", "月费合计(CNY)",
-        "年费合计(CNY)", "预付金额(CNY)", "备注",
+        "年费合计(CNY)", "预付金额(CNY)", "备注", "客户原始需求",
     ]
     write_header_row(ws, header_row, headers)
     ws.row_dimensions[header_row].height = 30
@@ -164,7 +164,7 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
     total_yearly = 0
     total_upfront = 0
     fmt = [None, None, None, None, "#,##0", "#,##0", None,
-           CNY_FORMAT, CNY_FORMAT, CNY_FORMAT, CNY_FORMAT, CNY_FORMAT, None]
+           None, CNY_FORMAT, CNY_FORMAT, CNY_FORMAT, CNY_FORMAT, None, None]
 
     for idx, r in enumerate(results, 1):
         row_num = data_start + idx - 1
@@ -183,7 +183,7 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
             r.get("instance_type", ""),
             region_name,
             r.get("quantity", 1),
-            r.get("usage_hours", 730),
+            r.get("usage_hours", 720),
             billing_name,
             r.get("hourly_after_discount", 0),
             r.get("monthly_per_unit", 0),
@@ -191,6 +191,7 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
             r.get("yearly_total", 0),
             r.get("upfront_total", 0),
             notes,
+            r.get("original_request", ""),
         ]
         write_data_row(ws, row_num, values, fmt)
 
@@ -202,7 +203,7 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
     total_row = data_start + len(results)
     total_values = [
         "", "合计", "", "", "", "", "",
-        "", "", total_monthly, total_yearly, total_upfront, "",
+        "", "", total_monthly, total_yearly, total_upfront, "", "",
     ]
     write_total_row(ws, total_row, total_values, fmt)
 
@@ -211,16 +212,14 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
     notes_text = [
         "说明:",
         "1. 以上报价基于 AWS 中国区公开定价（list price），实际费用以 AWS 账单为准。",
-        "2. 预留实例(RI)和 Savings Plans 需要签订承诺合同。",
-        "3. 数据传输费、请求费等额外费用未包含在实例费用中，请另行计算。",
-        f"4. 本报价有效期至 {expire_date.strftime('%Y年%m月%d日')}。",
+        "2. 数据传输费、请求费等额外费用未包含在实例费用中，请另行计算。",
     ]
     if include_tax:
-        notes_text.append("5. 以上金额已包含 6% 增值税。")
+        notes_text.append("3. 以上金额已包含 6% 增值税。")
     for i, note in enumerate(notes_text):
         cell = ws.cell(row=foot_row + i, column=1, value=note)
         cell.font = Font(name="微软雅黑", size=9, color="666666")
-        ws.merge_cells(start_row=foot_row + i, start_column=1, end_row=foot_row + i, end_column=13)
+        ws.merge_cells(start_row=foot_row + i, start_column=1, end_row=foot_row + i, end_column=14)
 
     # --- Sheet 2: 费率对比（如果有 RI 数据） ---
     has_ri = any(r.get("billing_mode", "").startswith("ri-") for r in results)
@@ -276,7 +275,7 @@ def main():
                 "instance_type": item.get("instance_type", ""),
                 "region": item.get("region", ""),
                 "quantity": int(item.get("quantity", 1) or 1),
-                "usage_hours": float(item.get("usage_hours", 730) or 730),
+                "usage_hours": float(item.get("usage_hours", 720) or 720),
                 "billing_mode": billing_mode,
                 "hourly_list": 0, "hourly_after_discount": 0,
                 "monthly_per_unit": 0, "monthly_total": 0,
@@ -284,6 +283,7 @@ def main():
                 "warning": "未找到价格",
                 "applied_discounts": [],
                 "notes": item.get("notes", ""),
+                "original_request": item.get("original_request", ""),
                 "currency": "CNY",
             })
             continue

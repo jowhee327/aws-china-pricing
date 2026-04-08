@@ -337,7 +337,7 @@ def format_sp_output(sp_data: list[dict], on_demand_hourly: float = 0) -> str:
     for sp in sp_data:
         sp_type_short = "Compute SP" if sp["sp_type"] == "ComputeSavingsPlans" else "Instance SP"
         label = f"{sp_type_short} {sp['term']} {sp['purchase_option']}"
-        monthly = sp["hourly_rate"] * 730
+        monthly = sp["hourly_rate"] * 720
         saving = ""
         if on_demand_hourly > 0:
             pct = (on_demand_hourly - sp["hourly_rate"]) / on_demand_hourly * 100
@@ -363,7 +363,7 @@ def _format_sp_for_comparison(sp_data: list[dict]) -> list[dict]:
         rates.append({
             "mode": label,
             "hourly": sp["hourly_rate"],
-            "monthly": round(sp["hourly_rate"] * 730, 2),
+            "monthly": round(sp["hourly_rate"] * 720, 2),
             "yearly": round(sp["hourly_rate"] * 8760, 2),
             "upfront": -1,  # -1 = SP upfront depends on commitment, not per-instance
             "currency": sp.get("currency", "CNY"),
@@ -512,7 +512,7 @@ def calculate_effective_hourly(pricing: dict) -> list[dict]:
             results.append({
                 "mode": "On-Demand",
                 "hourly": od_hourly,
-                "monthly": od_hourly * 730,
+                "monthly": od_hourly * 720,
                 "yearly": od_hourly * 8760,
                 "currency": od["currency"],
             })
@@ -543,7 +543,7 @@ def calculate_effective_hourly(pricing: dict) -> list[dict]:
         results.append({
             "mode": mode,
             "hourly": round(effective_hourly, 6),
-            "monthly": round(effective_hourly * 730, 2),
+            "monthly": round(effective_hourly * 720, 2),
             "yearly": round(effective_hourly * 8760, 2),
             "upfront": upfront,
             "currency": currency,

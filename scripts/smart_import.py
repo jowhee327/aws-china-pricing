@@ -33,13 +33,24 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     (["dynamodb", "nosql", "键值数据库", "key-value"], "AmazonDynamoDB", {}),
     (["redshift", "数仓", "数据仓库", "data warehouse"], "AmazonRedshift", {}),
     (["memorydb", "内存数据库"], "AmazonMemoryDB", {}),
-    # RDS 放最后（因为 "数据库" 太宽泛，避免抢先匹配专用库）
-    (["rds", "mysql", "postgresql", "postgres", "mariadb", "oracle", "sql server",
-      "database", "数据库", "关系数据库"], "AmazonRDS", {}),
+    # RDS 按引擎区分（具体引擎优先，通用关键词兜底默认 MySQL）
+    (["aurora mysql", "aurora-mysql"], "AmazonRDS", {"engine": "Aurora MySQL"}),
+    (["aurora postgresql", "aurora-postgresql", "aurora postgres"], "AmazonRDS", {"engine": "Aurora PostgreSQL"}),
+    (["aurora"], "AmazonRDS", {"engine": "Aurora MySQL"}),
+    (["mysql", "mysql数据库"], "AmazonRDS", {"engine": "MySQL"}),
+    (["postgresql", "postgres", "pg数据库"], "AmazonRDS", {"engine": "PostgreSQL"}),
+    (["mariadb"], "AmazonRDS", {"engine": "MariaDB"}),
+    (["oracle", "oracle数据库"], "AmazonRDS", {"engine": "Oracle"}),
+    (["sql server", "sqlserver", "mssql"], "AmazonRDS", {"engine": "SQL Server"}),
+    (["rds", "database", "数据库", "关系数据库"], "AmazonRDS", {"engine": "MySQL"}),
 
     # ── 缓存类 ──
     (["dax", "dynamodb加速"], "AmazonDAX", {}),
-    (["缓存", "redis", "memcached", "elasticache", "cache"], "AmazonElastiCache", {}),
+    # ElastiCache 按引擎区分（具体引擎优先，通用关键词兜底默认 Redis）
+    (["valkey"], "AmazonElastiCache", {"engine": "Valkey"}),
+    (["memcached"], "AmazonElastiCache", {"engine": "Memcached"}),
+    (["redis"], "AmazonElastiCache", {"engine": "Redis"}),
+    (["缓存", "elasticache", "cache"], "AmazonElastiCache", {"engine": "Redis"}),
 
     # ── 存储类 ──
     (["glacier", "归档", "冷存储", "archive"], "AmazonGlacier", {}),
@@ -61,7 +72,10 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     (["sqs", "消息队列", "队列", "message queue"], "AWSQueueService", {}),
     (["sns", "通知", "推送", "notification"], "AmazonSNS", {}),
     (["kafka", "msk", "消息流"], "AmazonMSK", {}),
-    (["mq", "rabbitmq", "activemq"], "AmazonMQ", {}),
+    # MQ 按引擎区分（默认 RabbitMQ）
+    (["rabbitmq"], "AmazonMQ", {"engine": "RabbitMQ"}),
+    (["activemq"], "AmazonMQ", {"engine": "ActiveMQ"}),
+    (["mq", "消息代理"], "AmazonMQ", {"engine": "RabbitMQ"}),
     (["eventbridge", "事件"], "AWSEvents", {}),
     (["kinesis firehose", "数据投递"], "AmazonKinesisFirehose", {}),
     (["kinesis analytics", "流分析"], "AmazonKinesisAnalytics", {}),
@@ -131,6 +145,10 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
 
 # 引擎提示：从输入文本中推断 engine / cacheEngine
 ENGINE_HINTS = {
+    "aurora mysql": ("engine", "Aurora MySQL"),
+    "aurora postgresql": ("engine", "Aurora PostgreSQL"),
+    "aurora postgres": ("engine", "Aurora PostgreSQL"),
+    "aurora": ("engine", "Aurora MySQL"),
     "mysql": ("engine", "MySQL"),
     "postgresql": ("engine", "PostgreSQL"),
     "postgres": ("engine", "PostgreSQL"),
@@ -139,6 +157,7 @@ ENGINE_HINTS = {
     "sql server": ("engine", "SQL Server"),
     "redis": ("cacheEngine", "Redis"),
     "memcached": ("cacheEngine", "Memcached"),
+    "valkey": ("cacheEngine", "Valkey"),
 }
 
 # ── 输入列名映射（宽松列名 → 标准列名）──
@@ -283,8 +302,13 @@ def process_row(row: dict, region: str) -> dict:
     """处理单行，返回标准化的 calculate_cost.py 输入格式"""
     norm = normalize_columns(row)
 
+    # 保留客户原始需求描述
+    orig_svc = norm.get("service", "")
+    orig_spec = norm.get("spec", "")
+    original_request = " ".join(filter(None, [orig_svc, orig_spec])).strip()
+
     # 如果已有标准 service 列且值是已知 ServiceCode，直接透传
-    service_raw = norm.get("service", "")
+    service_raw = orig_svc
     known_codes = {sc for _, sc, _ in SERVICE_RULES}
     if service_raw and service_raw in known_codes:
         # 已经是标准格式，补充默认值
@@ -293,12 +317,13 @@ def process_row(row: dict, region: str) -> dict:
             "instance_type": norm.get("instance_type", norm.get("spec", "")),
             "region": norm.get("region", region),
             "quantity": norm.get("quantity", "1") or "1",
-            "usage_hours": norm.get("usage_hours", "730"),
+            "usage_hours": norm.get("usage_hours", "720"),
             "os": norm.get("os", ""),
             "engine": norm.get("engine", ""),
             "storage_gb": norm.get("storage_gb", ""),
             "billing_mode": norm.get("billing_mode", "on-demand"),
             "notes": norm.get("notes", ""),
+            "original_request": original_request,
         }
         return result
 
@@ -357,16 +382,19 @@ def process_row(row: dict, region: str) -> dict:
         "instance_type": norm.get("instance_type", ""),
         "region": norm.get("region", region),
         "quantity": norm.get("quantity", "1") or "1",
-        "usage_hours": norm.get("usage_hours", "730"),
+        "usage_hours": norm.get("usage_hours", "720"),
         "os": norm.get("os", "Linux") if service_code == "AmazonEC2" else norm.get("os", ""),
         "engine": norm.get("engine", "") or engine_info.get("engine", ""),
         "storage_gb": norm.get("storage_gb", ""),
         "billing_mode": norm.get("billing_mode", "on-demand"),
         "notes": norm.get("notes", ""),
+        "original_request": original_request,
     }
 
-    # 应用附加字段
-    result.update(extra_fields)
+    # 应用附加字段（仅在未显式设置时作为默认值）
+    for k, v in extra_fields.items():
+        if not result.get(k):
+            result[k] = v
 
     # 应用缓存引擎
     if "cacheEngine" in engine_info and service_code == "AmazonElastiCache":
@@ -442,7 +470,7 @@ def save_csv(items: list[dict], output_path: str):
 
     fieldnames = [
         "service", "instance_type", "region", "quantity", "usage_hours",
-        "os", "engine", "storage_gb", "billing_mode", "notes",
+        "os", "engine", "storage_gb", "billing_mode", "notes", "original_request",
     ]
     # 添加可能存在的额外字段
     for item in items:
@@ -465,7 +493,7 @@ def print_csv(items: list[dict]):
 
     fieldnames = [
         "service", "instance_type", "region", "quantity", "usage_hours",
-        "os", "engine", "storage_gb", "billing_mode", "notes",
+        "os", "engine", "storage_gb", "billing_mode", "notes", "original_request",
     ]
 
     writer = csv.DictWriter(sys.stdout, fieldnames=fieldnames, extrasaction="ignore")
@@ -532,7 +560,7 @@ def main():
             tmp_path = tmp.name
             fieldnames = [
                 "service", "instance_type", "region", "quantity", "usage_hours",
-                "os", "engine", "storage_gb", "billing_mode", "notes",
+                "os", "engine", "storage_gb", "billing_mode", "notes", "original_request",
             ]
             writer = csv.DictWriter(tmp, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()

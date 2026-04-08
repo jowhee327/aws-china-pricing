@@ -105,7 +105,7 @@ def query_matching_instances(region: str, vcpu_min: int, memory_min: float,
             "processor": attrs.get("physicalProcessor", ""),
             "generation": attrs.get("currentGeneration", ""),
             "hourly_price": hourly_price,
-            "monthly_price": round(hourly_price * 730, 2),
+            "monthly_price": round(hourly_price * 720, 2),
             "currency": od.get("currency", "CNY"),
             "cost_efficiency": round(cost_efficiency, 2),
         })
@@ -137,7 +137,7 @@ def format_recommendations(results: list[dict], vcpu_min: int, memory_min: float
 
     lines.append("")
     lines.append("注: 性价比 = (vCPU + 内存GiB×0.25) / 小时费率，越高越好")
-    lines.append("    月费用按 730 小时/月计算")
+    lines.append("    月费用按 720 小时/月计算")
 
     # Top 3 推荐
     if len(results) >= 3:
