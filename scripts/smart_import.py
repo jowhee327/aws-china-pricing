@@ -266,6 +266,25 @@ def is_non_hourly_service(service_code: str) -> bool:
     }
 
 
+# 非小时计费服务的默认用量估算配置
+# 格式: service_code: (default_usage, unit_desc, note)
+NON_HOURLY_SERVICES: dict[str, tuple[int, str, str]] = {
+    "AWSLambda": (1000000, "请求数", "预估100万次请求/月"),
+    "AmazonDynamoDB": (0, "RCU/WCU", "按需模式，按实际用量"),
+    "AWSQueueService": (1000000, "请求数", "预估100万次请求/月"),
+    "AmazonSNS": (1000000, "发布数", "预估100万次发布/月"),
+    "AmazonApiGateway": (1000000, "调用数", "预估100万次调用/月"),
+    "AmazonCloudWatch": (0, "指标+日志量", "基础监控免费，自定义按量"),
+    "AMAZONROUTE53REGIONALCHINA": (1, "托管区域", "1个托管区域"),
+    "awskms": (10000, "请求数", "预估1万次请求/月"),
+    "AWSCloudTrail": (0, "事件数", "管理事件免费"),
+    "AWSConfig": (0, "配置项", "按实际配置项"),
+    "AWSXRay": (100000, "追踪数", "预估10万追踪/月"),
+    "AmazonStates": (100000, "状态转换数", "预估10万次转换/月"),
+    "AWSSecretsManager": (10, "密钥数", "预估10个密钥"),
+    "AWSAppSync": (1000000, "请求数", "预估100万次请求/月"),
+}
+
 # 非AWS标准服务替代建议
 NON_STANDARD_SERVICE_SUGGESTIONS: dict[str, str] = {
     "云堡垒机": "建议使用 AWS Systems Manager Session Manager",
@@ -873,10 +892,22 @@ def build_item(row_values: list, column_roles: dict[int, str],
               or engine_info.get("cacheEngine", "")
               or extra_fields.get("engine", ""))
 
-    # 存储服务使用存储量作为 usage_hours，而不是 720 小时
+    # 设置 usage_hours 值
     usage_hours_value = "720"  # 默认值
+
+    # 存储服务使用存储量作为 usage_hours，而不是 720 小时
     if is_storage_service(service_code) and spec_info.get("storage_gb"):
         usage_hours_value = str(spec_info["storage_gb"])
+    # 非小时计费服务使用默认估算用量
+    elif service_code in NON_HOURLY_SERVICES:
+        default_usage, unit_desc, note = NON_HOURLY_SERVICES[service_code]
+        usage_hours_value = str(default_usage)
+        # 在备注中添加说明
+        if note:
+            if notes_parts:
+                notes_parts.insert(0, note)
+            else:
+                notes_parts.append(note)
 
     result = {
         "sheet_name": sheet_name,
@@ -1050,10 +1081,23 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         spec_text = norm.get("spec", "")
         spec_info = extract_spec(spec_text)
 
-        # 存储服务使用存储量作为 usage_hours
+        # 设置 usage_hours 值
         usage_hours_value = norm.get("usage_hours", "720")
+        notes_value = norm.get("notes", "")
+
+        # 存储服务使用存储量作为 usage_hours
         if is_storage_service(orig_svc) and spec_info.get("storage_gb") and (not usage_hours_value or usage_hours_value == "720"):
             usage_hours_value = str(spec_info["storage_gb"])
+        # 非小时计费服务使用默认估算用量（只有在用户没有明确指定时才使用默认值）
+        elif orig_svc in NON_HOURLY_SERVICES and (not usage_hours_value or usage_hours_value == "720"):
+            default_usage, unit_desc, note = NON_HOURLY_SERVICES[orig_svc]
+            usage_hours_value = str(default_usage)
+            # 在备注中添加说明
+            if note:
+                if notes_value:
+                    notes_value = f"{note}; {notes_value}"
+                else:
+                    notes_value = note
 
         result = {
             "sheet_name": "",
@@ -1066,7 +1110,7 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
             "engine": norm.get("engine", ""),
             "storage_gb": norm.get("storage_gb", ""),
             "billing_mode": norm.get("billing_mode", item_billing_mode),
-            "notes": norm.get("notes", ""),
+            "notes": notes_value,
             "original_request": original_request,
             "section": "",
         }
@@ -1132,10 +1176,23 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         # 非 RI/SP 模式：标准化简化名称
         item_billing_mode = normalize_billing_mode(billing_mode)
 
-    # 存储服务使用存储量作为 usage_hours，而不是 720 小时
+    # 设置 usage_hours 值
     usage_hours_value = norm.get("usage_hours", "720")
+    csv_notes = norm.get("notes", "")
+
+    # 存储服务使用存储量作为 usage_hours，而不是 720 小时
     if is_storage_service(service_code) and spec_info.get("storage_gb") and (not usage_hours_value or usage_hours_value == "720"):
         usage_hours_value = str(spec_info["storage_gb"])
+    # 非小时计费服务使用默认估算用量（只有在用户没有明确指定时才使用默认值）
+    elif service_code in NON_HOURLY_SERVICES and (not usage_hours_value or usage_hours_value == "720"):
+        default_usage, unit_desc, note = NON_HOURLY_SERVICES[service_code]
+        usage_hours_value = str(default_usage)
+        # 在备注中添加说明
+        if note:
+            if csv_notes:
+                csv_notes = f"{note}; {csv_notes}"
+            else:
+                csv_notes = note
 
     result = {
         "sheet_name": "",
@@ -1148,7 +1205,7 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         "engine": norm.get("engine", "") or engine_info.get("engine", ""),
         "storage_gb": norm.get("storage_gb", ""),
         "billing_mode": norm.get("billing_mode", item_billing_mode),
-        "notes": norm.get("notes", ""),
+        "notes": csv_notes,
         "original_request": original_request,
         "section": "",
     }
