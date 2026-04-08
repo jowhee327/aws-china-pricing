@@ -185,6 +185,10 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
         else:
             user_filters["databaseEngine"] = item["engine"]
 
+    # S3 存储类别过滤器（AWS Pricing API 中 S3 用 volumeType 字段表示存储类别）
+    if service == "AmazonS3" and item.get("storageClass"):
+        user_filters["volumeType"] = item["storageClass"]
+
     # 查询 API，无结果时降级到本地缓存
     products = query_api(query_service, region, user_filters, max_results=3)
     if not products:
@@ -308,11 +312,16 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
 
     # 计算成本
     product_family = item.get("productFamily") or item.get("productfamily") or ""
-    is_ebs_storage = (product_family == "Storage" and (service == "AmazonEC2" or service == "AmazonEBS"))
-    if is_ebs_storage:
-        # EBS: 价格单位是 per GB-month，不是 per hour
+    STORAGE_SERVICES = {"AmazonEBS", "AmazonS3", "AmazonEFS", "AmazonFSx", "AmazonGlacier"}
+    is_storage_service = (
+        service in STORAGE_SERVICES
+        or (product_family == "Storage" and service in ("AmazonEC2", "AmazonEBS"))
+    )
+
+    if is_storage_service:
+        # 存储服务: 价格单位是 per GB-month，不是 per hour
         storage_gb = float(item.get("storage_gb", 0) or 0)
-        monthly_per_unit = hourly_after_discount * storage_gb
+        monthly_per_unit = hourly_after_discount * max(storage_gb, 1)
     else:
         monthly_per_unit = hourly_after_discount * usage_hours
     monthly_total = monthly_per_unit * quantity

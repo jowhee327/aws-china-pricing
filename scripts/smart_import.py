@@ -203,6 +203,18 @@ EBS_VOLUME_HINTS: list[tuple[list[str], str]] = [
     (["通用ssd", "通用SSD", "通用型ssd", "ssd存储", "快速存储"], "gp3"),
 ]
 
+# S3 存储类别提示词
+S3_STORAGE_CLASS_HINTS: list[tuple[list[str], str]] = [
+    (["intelligent-tiering", "智能分层", "smart tiering"], "Intelligent-Tiering"),
+    (["standard-ia", "低频访问", "infrequent access", "ia存储"], "Standard - Infrequent Access"),
+    (["one zone-ia", "单区低频", "one zone ia"], "One Zone - Infrequent Access"),
+    (["glacier instant", "即时检索"], "Glacier Instant Retrieval"),
+    (["glacier flexible", "灵活检索"], "Glacier Flexible Retrieval"),
+    (["glacier deep", "深度归档", "deep archive"], "Glacier Deep Archive"),
+    (["glacier", "归档"], "Glacier Flexible Retrieval"),
+    (["standard", "标准存储"], "General Purpose"),
+]
+
 
 def detect_ebs_volume_type(text: str) -> str:
     """从文本中检测 EBS 卷类型，默认 gp3"""
@@ -212,6 +224,46 @@ def detect_ebs_volume_type(text: str) -> str:
             if kw in text_lower:
                 return volume_type
     return "gp3"
+
+
+def detect_s3_storage_class(text: str) -> str:
+    """从文本中检测 S3 存储类别，默认 General Purpose"""
+    text_lower = text.lower()
+    for keywords, storage_class in S3_STORAGE_CLASS_HINTS:
+        for kw in keywords:
+            if kw in text_lower:
+                return storage_class
+    return "General Purpose"  # 默认 Standard
+
+
+def is_storage_service(service_code: str) -> bool:
+    """判断是否为存储类服务（按 GB-month 计费）"""
+    return service_code in {
+        "AmazonEBS", "AmazonS3", "AmazonEFS",
+        "AmazonFSx", "AmazonGlacier"
+    }
+
+
+def is_non_hourly_service(service_code: str) -> bool:
+    """判断是否为非小时计费服务
+
+    TODO: 以下服务使用特殊计费单位，需要根据用户指定的用量正确计算：
+    - AWSLambda: 按请求数和 GB-seconds 计费
+    - AmazonDynamoDB: 按 WCU/RCU 或请求数计费
+    - AWSQueueService (SQS): 按请求数计费
+    - AmazonSNS: 按请求数计费
+    - AmazonApiGateway: 按请求数计费
+    - AmazonCloudWatch: 按指标/日志量计费
+    - AMAZONROUTE53REGIONALCHINA: 按托管区域+查询数计费
+    - awskms: 按请求数计费
+
+    当前保持现有行为（显示 720 作为占位符），用户指定具体用量时需要正确使用。
+    """
+    return service_code in {
+        "AWSLambda", "AmazonDynamoDB", "AWSQueueService",
+        "AmazonSNS", "AmazonApiGateway", "AmazonCloudWatch",
+        "AMAZONROUTE53REGIONALCHINA", "awskms"
+    }
 
 
 # 非AWS标准服务替代建议
@@ -352,7 +404,7 @@ COLUMN_ALIASES = {
 OUTPUT_FIELDS = [
     "sheet_name", "service", "instance_type", "region", "quantity", "usage_hours",
     "os", "engine", "storage_gb", "billing_mode", "productFamily", "volumeApiName",
-    "notes", "original_request", "section",
+    "storageClass", "notes", "original_request", "section",
 ]
 
 
@@ -446,23 +498,35 @@ def extract_spec(text: str) -> dict:
         ):
             start = mm.start()
             prefix = text[max(0, start - 3):start]
-            if not re.search(r'存储|storage|磁盘|disk', prefix, re.IGNORECASE):
+            # 排除存储相关的关键词，以及存储服务上下文
+            context = text[max(0, start-10):mm.end()+10].lower()
+            exclude_keywords = ['存储', 'storage', '磁盘', 'disk', 'ssd', 'hdd', 'gp3', 'gp2', 'io1', 'io2']
+            if not any(keyword in context for keyword in exclude_keywords):
                 info["memory"] = int(mm.group(1))
                 break
 
-    # 3. 存储: "存储128G", "1TB", "500G存储"
+    # 3. 存储: "存储128G", "1TB", "500G存储", "100GB", "2TB"
     if "storage_gb" not in info:
+        # TB 格式
         m = re.search(r'(\d+)\s*[tT][bB]', text)
         if m:
             info["storage_gb"] = int(m.group(1)) * 1024
         else:
-            m = re.search(r'(?:存储|storage|磁盘|disk)\s*(\d+)\s*[gG]',
-                          text, re.IGNORECASE)
-            if not m:
-                m = re.search(r'(\d+)\s*[gG][bB]?\s*(?:存储|storage|磁盘|disk)',
-                              text, re.IGNORECASE)
-            if m:
-                info["storage_gb"] = int(m.group(1))
+            # GB 格式：支持多种模式
+            patterns = [
+                r'(?:存储|storage|磁盘|disk)\s*(\d+)\s*[gG][bB]?',  # "存储100G"
+                r'(\d+)\s*[gG][bB]?\s*(?:存储|storage|磁盘|disk)',  # "100G存储"
+                r'(\d+)\s*[gG][bB](?![a-zA-Z])',  # "100GB" (确保GB后面没有其他字母)
+            ]
+            for pattern in patterns:
+                m = re.search(pattern, text, re.IGNORECASE)
+                if m:
+                    # 确保不是内存相关的GB（通过检查前后文）
+                    full_match = m.group(0)
+                    context = text[max(0, m.start()-10):m.end()+10].lower()
+                    if not any(word in context for word in ['内存', 'memory', 'ram', 'vcpu', 'cpu']):
+                        info["storage_gb"] = int(m.group(1))
+                        break
 
     # 4. 带宽/IO 标注
     notes = []
@@ -745,13 +809,13 @@ def build_item(row_values: list, column_roles: dict[int, str],
     unit_clean = unit_text.lower().rstrip("/月")
     if unit_clean in ("gib", "gb", "g"):
         is_storage = (extra_fields.get("productFamily") == "Storage"
-                      or service_code in ("AmazonEFS", "AmazonS3", "AmazonFSx"))
+                      or service_code in ("AmazonEBS", "AmazonS3", "AmazonEFS", "AmazonFSx", "AmazonGlacier"))
         if is_storage:
             spec_info.setdefault("storage_gb", qty)
             qty = 1
     elif unit_clean in ("tb", "t"):
         is_storage = (extra_fields.get("productFamily") == "Storage"
-                      or service_code in ("AmazonEFS", "AmazonS3", "AmazonFSx"))
+                      or service_code in ("AmazonEBS", "AmazonS3", "AmazonEFS", "AmazonFSx", "AmazonGlacier"))
         if is_storage:
             spec_info.setdefault("storage_gb", qty * 1024)
             qty = 1
@@ -809,13 +873,18 @@ def build_item(row_values: list, column_roles: dict[int, str],
               or engine_info.get("cacheEngine", "")
               or extra_fields.get("engine", ""))
 
+    # 存储服务使用存储量作为 usage_hours，而不是 720 小时
+    usage_hours_value = "720"  # 默认值
+    if is_storage_service(service_code) and spec_info.get("storage_gb"):
+        usage_hours_value = str(spec_info["storage_gb"])
+
     result = {
         "sheet_name": sheet_name,
         "service": service_code,
         "instance_type": "",
         "region": region,
         "quantity": str(qty),
-        "usage_hours": "720",
+        "usage_hours": usage_hours_value,
         "os": "Linux" if service_code == "AmazonEC2" else "",
         "engine": engine,
         "storage_gb": str(spec_info["storage_gb"]) if spec_info.get("storage_gb") else "",
@@ -847,6 +916,25 @@ def build_item(row_values: list, column_roles: dict[int, str],
             result["notes"] = vol_note + "; " + result["notes"]
         else:
             result["notes"] = vol_note
+
+    # S3 存储类别检测
+    if service_code == "AmazonS3":
+        all_text_for_s3 = " ".join(filter(None, [
+            service_text, spec_text, description_text
+        ]))
+        detected_storage_class = detect_s3_storage_class(all_text_for_s3)
+        if detected_storage_class:
+            result["storageClass"] = detected_storage_class
+        # S3 不需要 os 字段
+        result["os"] = ""
+
+        # 在 notes 中标注存储类别（仅非默认时）
+        if detected_storage_class != "General Purpose":
+            storage_note = f"存储类别: {detected_storage_class}"
+            if result["notes"]:
+                result["notes"] = storage_note + "; " + result["notes"]
+            else:
+                result["notes"] = storage_note
 
     # 缓存引擎覆盖
     if "cacheEngine" in engine_info and service_code == "AmazonElastiCache":
@@ -958,13 +1046,22 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
             # 非 RI/SP 模式：标准化简化名称
             item_billing_mode = normalize_billing_mode(billing_mode)
 
-        return {
+        # 对已知服务代码也进行存储服务特殊处理
+        spec_text = norm.get("spec", "")
+        spec_info = extract_spec(spec_text)
+
+        # 存储服务使用存储量作为 usage_hours
+        usage_hours_value = norm.get("usage_hours", "720")
+        if is_storage_service(orig_svc) and spec_info.get("storage_gb") and (not usage_hours_value or usage_hours_value == "720"):
+            usage_hours_value = str(spec_info["storage_gb"])
+
+        result = {
             "sheet_name": "",
             "service": orig_svc,
             "instance_type": norm.get("instance_type", norm.get("spec", "")),
             "region": norm.get("region", region),
             "quantity": norm.get("quantity", "1") or "1",
-            "usage_hours": norm.get("usage_hours", "720"),
+            "usage_hours": usage_hours_value,
             "os": norm.get("os", ""),
             "engine": norm.get("engine", ""),
             "storage_gb": norm.get("storage_gb", ""),
@@ -973,6 +1070,12 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
             "original_request": original_request,
             "section": "",
         }
+
+        # 设置从 spec 中提取的 storage_gb
+        if spec_info.get("storage_gb") and not result["storage_gb"]:
+            result["storage_gb"] = str(spec_info["storage_gb"])
+
+        return result
 
     # 需要智能匹配
     svc_text = norm.get("service", "")
@@ -1029,13 +1132,18 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         # 非 RI/SP 模式：标准化简化名称
         item_billing_mode = normalize_billing_mode(billing_mode)
 
+    # 存储服务使用存储量作为 usage_hours，而不是 720 小时
+    usage_hours_value = norm.get("usage_hours", "720")
+    if is_storage_service(service_code) and spec_info.get("storage_gb") and (not usage_hours_value or usage_hours_value == "720"):
+        usage_hours_value = str(spec_info["storage_gb"])
+
     result = {
         "sheet_name": "",
         "service": service_code,
         "instance_type": norm.get("instance_type", ""),
         "region": norm.get("region", region),
         "quantity": norm.get("quantity", "1") or "1",
-        "usage_hours": norm.get("usage_hours", "720"),
+        "usage_hours": usage_hours_value,
         "os": norm.get("os", "Linux") if service_code == "AmazonEC2" else norm.get("os", ""),
         "engine": norm.get("engine", "") or engine_info.get("engine", ""),
         "storage_gb": norm.get("storage_gb", ""),

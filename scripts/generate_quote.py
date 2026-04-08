@@ -347,13 +347,17 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
             hourly = round(hourly * 1.06, 6)  # 6% 增值税
             monthly_per_unit = round(monthly_per_unit * 1.06, 2)  # 6% 增值税
 
-        # 检查是否为 EBS 存储
+        # 检查是否为存储服务
         product_family = r.get("productFamily") or r.get("productfamily") or ""
-        is_ebs_storage = (product_family == "Storage" and
-                         ("EBS" in service_name or r.get("service", "") == "AmazonEBS"))
+        service_code = r.get("service", "")
+        STORAGE_SERVICES = {"AmazonEBS", "AmazonS3", "AmazonEFS", "AmazonFSx", "AmazonGlacier"}
+        is_storage_service = (
+            service_code in STORAGE_SERVICES
+            or (product_family == "Storage" and service_code in ("AmazonEC2", "AmazonEBS"))
+        )
 
-        if is_ebs_storage:
-            # EBS 存储：F列显示 storage_gb，H列显示 GB月单价
+        if is_storage_service:
+            # 存储服务：F列显示 storage_gb，H列显示 GB月单价
             usage_display = r.get("storage_gb", 0)
             price_display = hourly  # per GB-month 单价
         else:
@@ -381,13 +385,17 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
 
         # 用公式替代硬编码数字
         cell_monthly_unit = ws.cell(row=row_num, column=9)
-        # 检查是否为 EBS 存储：productFamily=="Storage" 且 service 包含 "EBS"
+        # 检查是否为存储服务
         product_family = r.get("productFamily") or r.get("productfamily") or ""
-        is_ebs_storage = (product_family == "Storage" and
-                         ("EBS" in service_name or r.get("service", "") == "AmazonEBS"))
+        service_code = r.get("service", "")
+        STORAGE_SERVICES = {"AmazonEBS", "AmazonS3", "AmazonEFS", "AmazonFSx", "AmazonGlacier"}
+        is_storage_service = (
+            service_code in STORAGE_SERVICES
+            or (product_family == "Storage" and service_code in ("AmazonEC2", "AmazonEBS"))
+        )
 
-        if is_ebs_storage:
-            # EBS 存储：月费/台 = GB月单价(H列) × GB数(F列)
+        if is_storage_service:
+            # 存储服务：月费/台 = GB月单价(H列) × GB数(F列)
             cell_monthly_unit.value = f"=H{row_num}*F{row_num}"
         else:
             # 其他服务：月费/台 = 小时单价 * 月使用时长
