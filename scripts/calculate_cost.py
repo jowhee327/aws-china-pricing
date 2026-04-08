@@ -13,12 +13,15 @@
 import argparse
 import csv
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Optional
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    print("[ERROR] 需要 PyYAML 库: pip install pyyaml", file=sys.stderr)
+    sys.exit(1)
 
 SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -96,6 +99,8 @@ def load_workload(input_path: str) -> list[dict]:
             for row in rows[1:]:
                 item = {}
                 for i, h in enumerate(headers):
+                    if not h:
+                        continue
                     item[h] = str(row[i]).strip() if i < len(row) and row[i] is not None else ""
                 items.append(item)
             wb.close()
@@ -108,7 +113,8 @@ def load_workload(input_path: str) -> list[dict]:
         with open(path, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                items.append({k.strip().lower(): v.strip() for k, v in row.items()})
+                items.append({k.strip().lower(): v.strip() for k, v in row.items()
+                              if k is not None and v is not None})
         return items
 
 

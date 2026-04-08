@@ -34,7 +34,7 @@ SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from calculate_cost import (
     load_workload, load_discount_config, get_price_for_item,
-    calculate_item_cost, apply_discounts,
+    calculate_item_cost,
 )
 
 # 样式定义

@@ -379,7 +379,7 @@ def parse_quantity(value) -> tuple[int, str]:
     # 纯数字
     try:
         n = float(s)
-        return max(1, int(n)) if n == int(n) else max(1, int(n)), ""
+        return max(1, int(n)), ""
     except (ValueError, OverflowError):
         pass
 
@@ -845,7 +845,8 @@ def load_csv_file(input_path: str, region: str) -> list[dict]:
     with open(input_path, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            cleaned = {k.strip(): v.strip() for k, v in row.items()}
+            cleaned = {k.strip(): v.strip() for k, v in row.items()
+                       if k is not None and v is not None}
             items.append(cleaned)
     return items
 

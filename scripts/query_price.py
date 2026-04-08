@@ -371,11 +371,6 @@ def _format_sp_for_comparison(sp_data: list[dict]) -> list[dict]:
     return rates
 
 
-# Legacy compat
-def extract_sp_pricing(products):
-    return []
-
-
 def extract_pricing(product: dict) -> dict:
     """从产品数据中提取定价信息"""
     result = {
@@ -663,10 +658,6 @@ def main():
         print(f"\n建议运行以下命令更新本地缓存:", file=sys.stderr)
         print(f"  python3 {SCRIPT_DIR}/update_prices.py --region {query_region} --services {args.service}",
               file=sys.stderr)
-        sys.exit(1)
-
-    if not products:
-        print("未找到匹配的价格数据。")
         sys.exit(1)
 
     # 查询 Savings Plans（如果请求或在对比模式下）
