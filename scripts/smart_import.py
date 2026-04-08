@@ -12,7 +12,7 @@
 
 用法:
   # 最简用法：输入 Excel，输出 Excel 报价单（默认输出 {输入文件名}_报价单.xlsx）
-  python3 smart_import.py --input LBS.xlsx --region cn-north-1 --profile cn-north-1
+  python3 smart_import.py --input LBS.xlsx --region cn-north-1
 
   # 指定输出 Excel 报价单
   python3 smart_import.py --input LBS.xlsx --output quote.xlsx --region cn-north-1
@@ -1393,11 +1393,6 @@ def main():
     parser.add_argument("--customer", default="",
                         help="客户名称（报价单用）")
     args = parser.parse_args()
-
-    # 自动推断 AWS profile：中国区 region 时，默认用 region 名作为 profile
-    # 避免用户忘传 --profile 导致 AWS CLI 用全球区默认 profile 访问中国区 API 失败
-    if not args.profile and args.region.startswith("cn-"):
-        args.profile = args.region
 
     # 默认输出 Excel 报价单
     if not args.output and not args.calculate:

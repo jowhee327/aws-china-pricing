@@ -505,10 +505,6 @@ def main():
     parser.add_argument("--profile", default=None,
                        help="AWS CLI profile (默认: 不指定则用 AWS CLI 默认配置)")
     args = parser.parse_args()
-    # 自动推断 AWS profile：中国区 region 时，默认用 region 名作为 profile
-    if not args.profile and args.region.startswith("cn-"):
-        args.profile = args.region
-
     # 设置 profile
     if args.profile:
         import query_price

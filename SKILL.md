@@ -92,19 +92,18 @@ python3 scripts/recommend_instance.py --vcpu 8 --memory 32 --workload gpu --regi
 
 ```bash
 # 最简用法：输入 Excel，输出 {文件名}_报价单.xlsx
-python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1
 
 # 指定客户名称
-python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
   --customer "客户名称"
 
 # 含税报价
-python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
   --include-tax
 
 # 指定输出路径
-python3 scripts/smart_import.py --input workload.xlsx --output quote.xlsx --region cn-north-1 \
-  --profile cn-north-1
+python3 scripts/smart_import.py --input workload.xlsx --output quote.xlsx --region cn-north-1
 ```
 
 > **重要**：这是默认且唯一推荐的报价方式。不要分步调用 calculate_cost.py 或 generate_quote.py。

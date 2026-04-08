@@ -54,14 +54,14 @@ region = cn-north-1
 
 ```bash
 # 最简用法：输入 Excel，输出 {文件名}_报价单.xlsx
-python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1
 
 # 指定客户名称
-python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
   --customer “客户公司名称”
 
 # 含 6% 增值税
-python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
   --include-tax
 ```
 

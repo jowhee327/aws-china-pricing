@@ -54,14 +54,14 @@ Input Excel/CSV with natural language descriptions, output a professional Excel 
 
 ```bash
 # Simplest: input Excel → output {filename}_报价单.xlsx
-python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1
 
 # With customer name
-python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
   --customer "ACME Corp"
 
 # Include 6% VAT
-python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
   --include-tax
 ```
 
