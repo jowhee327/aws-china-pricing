@@ -168,7 +168,7 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
     headers = [
         "序号", "服务", "实例类型", "区域", "数量", "月使用时长(h)",
         "计费模式", "小时单价(CNY)", "月费/台(CNY)", "月费合计(CNY)",
-        "年费合计(CNY)", "预付金额(CNY)", "备注", "客户原始需求",
+        "年费合计(CNY)", "预付金额(CNY)", "备注", "原始需求",
     ]
     write_header_row(ws, header_row, headers)
     ws.row_dimensions[header_row].height = 30

@@ -1202,14 +1202,16 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
                 )
                 if inst:
                     item["instance_type"] = inst
-                    rec_desc = f"自动推荐: {desc}"
-                    # 提取推荐实例的实际内存，添加超配备注
+                    # 超配备注：仅在实际规格大于需求时标注
                     mem_match = re.search(r'/(\d+)GiB', desc)
                     if mem_match and memory > 0:
                         actual_mem = int(mem_match.group(1))
                         if actual_mem > memory:
-                            rec_desc += (f"; AWS 最小匹配规格为 {inst}"
-                                         f"({actual_mem}GiB)，原始需求 {memory}GiB")
+                            rec_desc = f"最小匹配规格 {inst}({actual_mem}GiB)"
+                        else:
+                            rec_desc = ""
+                    else:
+                        rec_desc = ""
                     item["notes"] = notes.replace(
                         m.group(0), rec_desc
                     ).strip()
@@ -1258,11 +1260,11 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
         best = rec_cache[key]
         if best:
             item["instance_type"] = best["instance_type"]
-            rec_desc = (f"自动推荐: {best['instance_type']} "
-                        f"({best['vcpu']}vCPU/{best['memory']:.0f}GiB)")
             if memory > 0 and best["memory"] > memory:
-                rec_desc += (f"; AWS 最小匹配规格为 {best['instance_type']}"
-                             f"({best['memory']:.0f}GiB)，原始需求 {memory}GiB")
+                rec_desc = (f"最小匹配规格 {best['instance_type']}"
+                            f"({best['memory']:.0f}GiB)")
+            else:
+                rec_desc = ""
             item["notes"] = notes.replace(m.group(0), rec_desc).strip()
         else:
             item["notes"] = notes.replace(
