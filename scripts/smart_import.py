@@ -1513,10 +1513,20 @@ def main():
     parser.add_argument("--customer", default="",
                         help="客户名称（报价单用）")
     parser.add_argument("--billing-mode", "-b", default="on-demand",
-                        choices=["on-demand", "ri-1y-no-upfront", "ri-1y-partial", "ri-1y-all",
+                        choices=["on-demand",
+                                # Standard RI
+                                "ri-1y-no-upfront", "ri-1y-partial", "ri-1y-all",
                                 "ri-3y-no-upfront", "ri-3y-partial", "ri-3y-all",
+                                # Convertible RI
+                                "ri-convertible-1y-no-upfront", "ri-convertible-1y-partial", "ri-convertible-1y-all",
+                                "ri-convertible-3y-no-upfront", "ri-convertible-3y-partial", "ri-convertible-3y-all",
+                                # Compute Savings Plans
                                 "sp-1y-no-upfront", "sp-1y-partial", "sp-1y-all",
                                 "sp-3y-no-upfront", "sp-3y-partial", "sp-3y-all",
+                                # Instance Savings Plans
+                                "sp-instance-1y-no-upfront", "sp-instance-1y-partial", "sp-instance-1y-all",
+                                "sp-instance-3y-no-upfront", "sp-instance-3y-partial", "sp-instance-3y-all",
+                                # Mixed RI+SP modes
                                 "ri-sp-1y-no-upfront", "ri-sp-1y-partial", "ri-sp-1y-all",
                                 "ri-sp-3y-no-upfront", "ri-sp-3y-partial", "ri-sp-3y-all"],
                         help="计费模式 (默认: on-demand)")

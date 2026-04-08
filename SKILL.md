@@ -189,15 +189,26 @@ python3 scripts/smart_import.py --input workload.xlsx -r cn-north-1 -b ri-3y-par
 
 **计费模式说明**：
 - `on-demand` — 按需付费（默认）
-- `ri-1y-no-upfront` — 标准RI 1年无预付
-- `ri-1y-partial` — 标准RI 1年部分预付  
-- `ri-1y-all` — 标准RI 1年全预付
-- `ri-3y-no-upfront` / `ri-3y-partial` / `ri-3y-all` — 标准RI 3年各种预付方式
-- `sp-1y-no-upfront` / `sp-1y-partial` / `sp-1y-all` — 计算型SP 1年各种预付方式
-- `sp-3y-no-upfront` / `sp-3y-partial` / `sp-3y-all` — 计算型SP 3年各种预付方式
-- `ri-sp-1y-no-upfront` — 混合模式：EC2 用 SP，其他服务用 RI（1年无预付）
-- `ri-sp-1y-partial` / `ri-sp-1y-all` — 混合模式 1年部分/全预付
-- `ri-sp-3y-no-upfront` / `ri-sp-3y-partial` / `ri-sp-3y-all` — 混合模式 3年各种预付方式
+
+**标准预留实例（Standard RI）**：
+- `ri-1y-no-upfront` / `ri-1y-partial` / `ri-1y-all` — 1年期（无预付/部分预付/全预付）
+- `ri-3y-no-upfront` / `ri-3y-partial` / `ri-3y-all` — 3年期（无预付/部分预付/全预付）
+
+**可转换预留实例（Convertible RI）**：
+- `ri-convertible-1y-no-upfront` / `ri-convertible-1y-partial` / `ri-convertible-1y-all` — 1年期
+- `ri-convertible-3y-no-upfront` / `ri-convertible-3y-partial` / `ri-convertible-3y-all` — 3年期
+
+**计算型 Savings Plans（Compute SP）**：
+- `sp-1y-no-upfront` / `sp-1y-partial` / `sp-1y-all` — 1年期
+- `sp-3y-no-upfront` / `sp-3y-partial` / `sp-3y-all` — 3年期
+
+**实例型 Savings Plans（Instance SP）**：
+- `sp-instance-1y-no-upfront` / `sp-instance-1y-partial` / `sp-instance-1y-all` — 1年期
+- `sp-instance-3y-no-upfront` / `sp-instance-3y-partial` / `sp-instance-3y-all` — 3年期
+
+**混合模式（RI+SP）**：
+- `ri-sp-1y-no-upfront` / `ri-sp-1y-partial` / `ri-sp-1y-all` — 1年期混合（EC2/Lambda/Fargate用SP，其他适用服务用RI）
+- `ri-sp-3y-no-upfront` / `ri-sp-3y-partial` / `ri-sp-3y-all` — 3年期混合
 
 > **注意**：简化名称会自动映射到标准名称（如 `ri-1y-partial` → `ri-standard-1yr-partial`，`sp-1y-no-upfront` → `sp-compute-1yr-no-upfront`）
 ```
