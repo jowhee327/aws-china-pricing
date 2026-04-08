@@ -282,8 +282,8 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
     else:
         hourly = price_data.get("on_demand_hourly", 0) or 0
         upfront_per_unit = 0
+        # 如果找不到指定计费模式的价格，静默使用按需价格
         if billing_mode != "on-demand" and (billing_mode.startswith("ri-") or billing_mode.startswith("sp-")):
-            result["warning"] = f"未找到 {billing_mode} 价格，使用按需价格"
             billing_mode = "on-demand"
 
     # 应用折扣
@@ -337,7 +337,7 @@ def format_results(results: list[dict]) -> str:
     for r in results:
         currency = r.get("currency", "CNY")
         discounts_str = ", ".join(r.get("applied_discounts", [])) or "-"
-        warning = f" ⚠ {r['warning']}" if r.get("warning") else ""
+        warning = ""  # 不再显示警告
 
         lines.append(
             f"{r['service']:<15} {r['instance_type']:<18} {r['region']:<16} {r['quantity']:>4} "

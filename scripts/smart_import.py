@@ -227,6 +227,16 @@ SERVICES_NEED_SPEC = {
     "AmazonES", "ElasticMapReduce",
 }
 
+# RI/SP 适用的服务
+RI_APPLICABLE_SERVICES = {
+    "AmazonEC2", "AmazonRDS", "AmazonElastiCache", "AmazonRedshift",
+    "AmazonES", "AmazonDocDB", "AmazonNeptune", "AmazonMemoryDB", "AmazonDynamoDB"
+}
+
+SP_APPLICABLE_SERVICES = {
+    "AmazonEC2", "AWSLambda", "AmazonECS"  # AmazonECS 包含 Fargate
+}
+
 # ── 托管服务 Graviton 实例映射 ────────────────────────────────────────────
 # EC2 保持 Intel，以下托管服务默认推荐最新代 Graviton (r7g/m7g)
 MANAGED_GRAVITON_SERVICES = {
@@ -715,16 +725,7 @@ def build_item(row_values: list, column_roles: dict[int, str],
             warning = f"应用服务 '{service_text}' 映射为EC2实例"
         else:
             service_code = service_text.strip() if service_text.strip() else "UNKNOWN"
-            # 检查是否有已知替代建议
-            suggestion = None
-            for key, sug in NON_STANDARD_SERVICE_SUGGESTIONS.items():
-                if key in service_text:
-                    suggestion = sug
-                    break
-            if suggestion:
-                warning = f"⚠️ 非AWS标准服务，无法自动查价。{suggestion}"
-            else:
-                warning = f"⚠️ 非AWS标准服务，请手动补充对应AWS服务"
+            warning = ""
 
     # ── 数量解析 ──
     qty, qty_note = parse_quantity(quantity_text)
@@ -756,25 +757,41 @@ def build_item(row_values: list, column_roles: dict[int, str],
     engine_info = detect_engine(all_text)
 
     # ── 计费模式 ──
-    # 混合模式支持：ri-sp 表示 EC2 用 SP，其他服务用 RI
+    # 检查服务是否适用指定的计费模式
     item_billing_mode = billing_mode
+
     if billing_mode.startswith("ri-sp-"):
-        # 提取基础配置：ri-sp-1y-no-upfront -> 1y-no-upfront
+        # 混合模式：ri-sp 表示 EC2/Fargate 用 SP，其他适用服务用 RI
         base_config = billing_mode.replace("ri-sp-", "")
-        if service_code == "AmazonEC2":
-            # EC2 使用对应的 SP
+        if service_code in SP_APPLICABLE_SERVICES:
+            # EC2/Lambda/Fargate 使用对应的 SP
             item_billing_mode = normalize_billing_mode(f"sp-{base_config}")
-        else:
-            # 其他服务使用 RI
+        elif service_code in RI_APPLICABLE_SERVICES:
+            # 其他适用服务使用 RI
             item_billing_mode = normalize_billing_mode(f"ri-{base_config}")
+        else:
+            # 不适用 RI/SP 的服务，使用按需
+            item_billing_mode = "on-demand"
+    elif billing_mode.startswith("ri-"):
+        # RI 模式：只有适用的服务才使用 RI
+        if service_code in RI_APPLICABLE_SERVICES:
+            item_billing_mode = normalize_billing_mode(billing_mode)
+        else:
+            # 不适用 RI 的服务，使用按需
+            item_billing_mode = "on-demand"
+    elif billing_mode.startswith("sp-"):
+        # SP 模式：只有适用的服务才使用 SP
+        if service_code in SP_APPLICABLE_SERVICES:
+            item_billing_mode = normalize_billing_mode(billing_mode)
+        else:
+            # 不适用 SP 的服务，使用按需
+            item_billing_mode = "on-demand"
     else:
-        # 非混合模式：标准化简化名称
+        # 非 RI/SP 模式：标准化简化名称
         item_billing_mode = normalize_billing_mode(billing_mode)
 
     # ── 构建备注（仅系统生成信息，不重复原始需求）──
     notes_parts: list[str] = []
-    if warning:
-        notes_parts.append(f"{warning}")
     if qty_note and qty_note != "按量付费":
         notes_parts.append(qty_note)
     if qty_note == "按量付费":
@@ -847,15 +864,7 @@ def build_item(row_values: list, column_roles: dict[int, str],
         result["notes"] = (recommend_tag + " " + result["notes"]).strip() \
             if result["notes"] else recommend_tag
 
-    # 需要实例规格的服务但未检测到任何规格 → 提醒用户
-    if (service_code in SERVICES_NEED_SPEC
-            and not spec_info.get("vcpu")
-            and not spec_info.get("memory")
-            and not spec_info.get("storage_gb")
-            and not result["instance_type"]):
-        no_spec_warn = "⚠️ 未指定具体规格，已使用默认最低配置查价，请确认是否符合需求"
-        result["notes"] = (result["notes"] + "; " + no_spec_warn).strip("; ") \
-            if result["notes"] else no_spec_warn
+    # 需要实例规格的服务但未检测到任何规格时不再添加警告
 
     # LB type annotation (ALB/NLB/CLB)
     lb_type = extra_fields.get("_lb_type")
@@ -957,7 +966,7 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         service_code, extra_fields, warning, _ = match_service_smart(all_text)
     if not service_code:
         service_code = svc_text.split()[0] if svc_text.strip() else "UNKNOWN"
-        warning = f"无法识别服务: '{all_text.strip()}'"
+        warning = ""
 
     spec_text = norm.get("spec", "")
     spec_info = extract_spec(spec_text)
@@ -968,19 +977,36 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
 
     engine_info = detect_engine(all_text)
 
-    # 处理混合计费模式
+    # 检查服务是否适用指定的计费模式
     item_billing_mode = billing_mode
     if billing_mode.startswith("ri-sp-"):
-        # 提取基础配置：ri-sp-1y-no-upfront -> 1y-no-upfront
+        # 混合模式：ri-sp 表示 EC2/Fargate 用 SP，其他适用服务用 RI
         base_config = billing_mode.replace("ri-sp-", "")
-        if service_code == "AmazonEC2":
-            # EC2 使用对应的 SP
+        if service_code in SP_APPLICABLE_SERVICES:
+            # EC2/Lambda/Fargate 使用对应的 SP
             item_billing_mode = normalize_billing_mode(f"sp-{base_config}")
-        else:
-            # 其他服务使用 RI
+        elif service_code in RI_APPLICABLE_SERVICES:
+            # 其他适用服务使用 RI
             item_billing_mode = normalize_billing_mode(f"ri-{base_config}")
+        else:
+            # 不适用 RI/SP 的服务，使用按需
+            item_billing_mode = "on-demand"
+    elif billing_mode.startswith("ri-"):
+        # RI 模式：只有适用的服务才使用 RI
+        if service_code in RI_APPLICABLE_SERVICES:
+            item_billing_mode = normalize_billing_mode(billing_mode)
+        else:
+            # 不适用 RI 的服务，使用按需
+            item_billing_mode = "on-demand"
+    elif billing_mode.startswith("sp-"):
+        # SP 模式：只有适用的服务才使用 SP
+        if service_code in SP_APPLICABLE_SERVICES:
+            item_billing_mode = normalize_billing_mode(billing_mode)
+        else:
+            # 不适用 SP 的服务，使用按需
+            item_billing_mode = "on-demand"
     else:
-        # 非混合模式：标准化简化名称
+        # 非 RI/SP 模式：标准化简化名称
         item_billing_mode = normalize_billing_mode(billing_mode)
 
     result = {
@@ -1013,8 +1039,7 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         result["notes"] = f"recommend:{vcpu}c{mem}g" + \
             (f" {result['notes']}" if result["notes"] else "")
 
-    if warning:
-        result["notes"] = (f"{warning} " + result["notes"]).strip()
+    # 不再添加警告到备注中
 
     return result
 

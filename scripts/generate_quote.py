@@ -274,10 +274,23 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
     cell.alignment = Alignment(horizontal="center")
     ws.row_dimensions[1].height = 40
 
+    # 检查是否有 EDP 折扣
+    edp_discount = ""
+    if sheet_results:
+        # 从第一条记录中检查是否有 EDP 折扣
+        for r in sheet_results:
+            applied_discounts = r.get("applied_discounts", [])
+            for discount in applied_discounts:
+                if discount.startswith("EDP"):
+                    edp_discount = discount
+                    break
+            if edp_discount:
+                break
+
     info_rows = [
         ("报价编号:", quote_no, "客户名称:", customer),
         ("报价日期:", quote_date.strftime("%Y-%m-%d"), "货币:", "CNY (人民币)"),
-        ("税费说明:", f"{'含税 (6% 增值税)' if include_tax else '不含税'}", "", ""),
+        ("税费说明:", f"{'含税 (6% 增值税)' if include_tax else '不含税'}", "EDP 折扣:", edp_discount or "无"),
     ]
     for i, (l1, v1, l2, v2) in enumerate(info_rows, 3):
         ws.cell(row=i, column=1, value=l1).font = BOLD_FONT
@@ -320,12 +333,13 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
             r.get("billing_mode", ""), r.get("billing_mode", ""))
         region_name = REGION_NAMES.get(r.get("region", ""), r.get("region", ""))
         service_name = SERVICE_DISPLAY_NAMES.get(r.get("service", ""), r.get("service", ""))
-        discounts_note = ", ".join(r.get("applied_discounts", []))
+        # 从 applied_discounts 中移除 EDP 相关折扣，只保留其他折扣
+        applied_discounts = r.get("applied_discounts", [])
+        non_edp_discounts = [d for d in applied_discounts if not d.startswith("EDP")]
+        discounts_note = ", ".join(non_edp_discounts)
         notes = r.get("notes", "")
         if discounts_note:
             notes = f"{notes} [{discounts_note}]" if notes else f"[{discounts_note}]"
-        if r.get("warning"):
-            notes = f"{notes} ⚠{r['warning']}" if notes else f"⚠{r['warning']}"
 
         hourly = r.get("hourly_after_discount", 0)
         if include_tax:
@@ -429,14 +443,7 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
                 ws = wb.create_sheet(title=safe_name)
             _write_quote_sheet(ws, sheet_results, config, sheet_title=display_name)
 
-    # 费率对比 sheet（如果有 RI 数据或指定了 --compare）
-    has_ri = any(r.get("billing_mode", "").startswith("ri-") for r in results)
-    if has_ri or config.get("compare"):
-        ws2 = wb.create_sheet("计费模式对比")
-        ws2.cell(row=1, column=1, value="各计费模式成本对比").font = TITLE_FONT
-        ws2.merge_cells("A1:H1")
-        ws2.cell(row=3, column=1,
-                 value="详细对比数据请使用 --compare 参数生成").font = SUBTITLE_FONT
+    # 不再生成"计费模式对比" sheet
 
     return wb
 
