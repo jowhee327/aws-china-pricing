@@ -129,15 +129,114 @@ BILLING_MODE_NAMES = {
 }
 
 SERVICE_DISPLAY_NAMES = {
-    "AmazonEBS": "EBS",
+    # 计算类
     "AmazonEC2": "EC2",
+    "AmazonECS": "ECS",
+    "AmazonEKS": "EKS",
+    "AmazonECR": "ECR",
+    "AWSLambda": "Lambda",
+
+    # 数据库类
     "AmazonRDS": "RDS",
+    "AmazonDynamoDB": "DynamoDB",
     "AmazonElastiCache": "ElastiCache",
+    "AmazonDocDB": "DocumentDB",
+    "AmazonNeptune": "Neptune",
+    "AmazonTimestream": "Timestream",
+    "AmazonRedshift": "Redshift",
+    "AmazonMemoryDB": "MemoryDB",
+    "AmazonDAX": "DAX",
+
+    # 存储类
     "AmazonS3": "S3",
+    "AmazonEBS": "EBS",
     "AmazonEFS": "EFS",
+    "AmazonFSx": "FSx",
+    "AmazonGlacier": "Glacier",
+
+    # 网络类
     "AmazonCloudFront": "CloudFront",
     "AWSELB": "ELB",
     "AmazonVPC": "VPC",
+    "AWSDirectConnect": "Direct Connect",
+    "AMAZONROUTE53REGIONALCHINA": "Route 53",
+    "awswaf": "WAF",
+    "AWSNetworkFirewall": "Network Firewall",
+
+    # 消息/流式
+    "AWSQueueService": "SQS",
+    "AmazonSNS": "SNS",
+    "AmazonMSK": "MSK",
+    "AmazonMQ": "MQ",
+    "AWSEvents": "EventBridge",
+    "AmazonKinesis": "Kinesis",
+    "AmazonKinesisFirehose": "Kinesis Firehose",
+    "AmazonKinesisAnalytics": "Kinesis Analytics",
+    "AmazonKinesisVideo": "Kinesis Video",
+
+    # 大数据/分析
+    "ElasticMapReduce": "EMR",
+    "AmazonAthena": "Athena",
+    "AWSGlue": "Glue",
+    "AmazonQuickSight": "QuickSight",
+    "AmazonES": "OpenSearch",
+
+    # AI/ML
+    "AmazonSageMaker": "SageMaker",
+    "AmazonPolly": "Polly",
+    "transcribe": "Transcribe",
+    "AmazonPersonalize": "Personalize",
+
+    # 安全类
+    "awskms": "KMS",
+    "ACM": "ACM",
+    "AmazonGuardDuty": "GuardDuty",
+    "AmazonInspectorV2": "Inspector",
+    "AWSSecretsManager": "Secrets Manager",
+    "AWSSecurityHub": "Security Hub",
+    "AWSFMS": "Firewall Manager",
+    "AWSIAMAccessAnalyzer": "IAM Access Analyzer",
+
+    # 运维/管理
+    "AmazonCloudWatch": "CloudWatch",
+    "AWSCloudTrail": "CloudTrail",
+    "AWSBackup": "Backup",
+    "AmazonWorkSpaces": "WorkSpaces",
+    "AWSDatabaseMigrationSvc": "DMS",
+    "AWSDataSync": "DataSync",
+    "IngestionServiceSnowball": "Snowball",
+    "AmazonStates": "Step Functions",
+    "AWSSystemsManager": "Systems Manager",
+    "AWSConfig": "Config",
+    "AWSServiceCatalog": "Service Catalog",
+    "AWSCloudFormation": "CloudFormation",
+    "AWSXRay": "X-Ray",
+    "AWSAppSync": "AppSync",
+    "AmazonApiGateway": "API Gateway",
+    "AWSTransfer": "Transfer Family",
+    "AWSGreengrass": "Greengrass",
+    "AWSStorageGateway": "Storage Gateway",
+    "AWSElementalMediaConvert": "MediaConvert",
+    "AmazonGameLift": "GameLift",
+    "AWSCostExplorer": "Cost Explorer",
+    "AWSBudgets": "Budgets",
+    "AWSComputeOptimizer": "Compute Optimizer",
+    "AWSCloudMap": "Cloud Map",
+    "AmazonVerifiedPermissions": "Verified Permissions",
+    "AmazonMWAA": "MWAA",
+    "AmazonSWF": "SWF",
+
+    # 开发工具
+    "CodeBuild": "CodeBuild",
+    "AWSCodeCommit": "CodeCommit",
+    "AWSCodeDeploy": "CodeDeploy",
+    "AWSCodePipeline": "CodePipeline",
+
+    # IoT 服务
+    "AWSIoT": "IoT Core",
+    "AWSIoTAnalytics": "IoT Analytics",
+    "AWSIoTEvents": "IoT Events",
+    "AWSIoTSiteWise": "IoT SiteWise",
 }
 
 
