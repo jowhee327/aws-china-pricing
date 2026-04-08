@@ -269,20 +269,20 @@ def is_non_hourly_service(service_code: str) -> bool:
 # 非小时计费服务的默认用量估算配置
 # 格式: service_code: (default_usage, unit_desc, note)
 NON_HOURLY_SERVICES: dict[str, tuple[int, str, str]] = {
-    "AWSLambda": (1000000, "请求数", "预估100万次请求/月"),
-    "AmazonDynamoDB": (0, "RCU/WCU", "按需模式，按实际用量"),
-    "AWSQueueService": (1000000, "请求数", "预估100万次请求/月"),
-    "AmazonSNS": (1000000, "发布数", "预估100万次发布/月"),
-    "AmazonApiGateway": (1000000, "调用数", "预估100万次调用/月"),
-    "AmazonCloudWatch": (0, "指标+日志量", "基础监控免费，自定义按量"),
-    "AMAZONROUTE53REGIONALCHINA": (1, "托管区域", "1个托管区域"),
-    "awskms": (10000, "请求数", "预估1万次请求/月"),
-    "AWSCloudTrail": (0, "事件数", "管理事件免费"),
-    "AWSConfig": (0, "配置项", "按实际配置项"),
-    "AWSXRay": (100000, "追踪数", "预估10万追踪/月"),
-    "AmazonStates": (100000, "状态转换数", "预估10万次转换/月"),
-    "AWSSecretsManager": (10, "密钥数", "预估10个密钥"),
-    "AWSAppSync": (1000000, "请求数", "预估100万次请求/月"),
+    "AWSLambda": (0, "请求数+GB-s", "按量计费，需根据实际调用量估算"),
+    "AmazonDynamoDB": (0, "RCU/WCU", "按量计费，需根据实际读写量估算"),
+    "AWSQueueService": (0, "请求数", "按量计费，需根据实际消息量估算"),
+    "AmazonSNS": (0, "发布数", "按量计费，需根据实际发布量估算"),
+    "AmazonApiGateway": (0, "调用数", "按量计费，需根据实际调用量估算"),
+    "AmazonCloudWatch": (0, "指标+日志", "基础监控免费，自定义指标按量"),
+    "AMAZONROUTE53REGIONALCHINA": (0, "查询数", "按托管区域+查询量计费"),
+    "awskms": (0, "请求数", "按量计费，需根据实际API调用量估算"),
+    "AWSCloudTrail": (0, "事件数", "管理事件免费，数据事件按量"),
+    "AWSConfig": (0, "配置项", "按实际配置项评估数计费"),
+    "AWSXRay": (0, "追踪数", "按量计费，需根据实际追踪量估算"),
+    "AmazonStates": (0, "转换数", "按量计费，需根据实际状态转换数估算"),
+    "AWSSecretsManager": (0, "密钥数", "按密钥数+API调用量计费"),
+    "AWSAppSync": (0, "请求数", "按量计费，需根据实际请求量估算"),
 }
 
 # 非AWS标准服务替代建议
