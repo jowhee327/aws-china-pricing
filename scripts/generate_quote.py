@@ -126,6 +126,19 @@ BILLING_MODE_NAMES = {
     "ri-convertible-3yr-no": "可转换RI 3年 无预付",
     "ri-convertible-3yr-partial": "可转换RI 3年 部分预付",
     "ri-convertible-3yr-all": "可转换RI 3年 全预付",
+    "sp-compute-1yr-no": "计算SP 1年 无预付",
+    "sp-compute-1yr-partial": "计算SP 1年 部分预付",
+    "sp-compute-1yr-all": "计算SP 1年 全预付",
+    "sp-compute-3yr-no": "计算SP 3年 无预付",
+    "sp-compute-3yr-partial": "计算SP 3年 部分预付",
+    "sp-compute-3yr-all": "计算SP 3年 全预付",
+    "sp-instance-1yr-no": "实例SP 1年 无预付",
+    "sp-instance-1yr-partial": "实例SP 1年 部分预付",
+    "sp-instance-1yr-all": "实例SP 1年 全预付",
+    "sp-instance-3yr-no": "实例SP 3年 无预付",
+    "sp-instance-3yr-partial": "实例SP 3年 部分预付",
+    "sp-instance-3yr-all": "实例SP 3年 全预付",
+    "ri-sp-1yr-no-upfront": "混合模式 1年无预付 (EC2用SP，其他用RI)",
 }
 
 SERVICE_DISPLAY_NAMES = {

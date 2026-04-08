@@ -277,6 +277,19 @@ GRAVITON_R6G_SPECS = [
     (64, 512, "16xlarge"),
 ]
 
+def normalize_billing_mode(mode: str) -> str:
+    """将简化的计费模式名称标准化为完整名称"""
+    # 处理简化名称：ri-1y-no-upfront -> ri-standard-1yr-no
+    if mode.startswith("ri-") and not mode.startswith("ri-sp-") and not mode.startswith("ri-standard-") and not mode.startswith("ri-convertible-"):
+        # 默认为 standard RI
+        mode = mode.replace("ri-", "ri-standard-")
+    if mode.startswith("sp-") and not mode.startswith("sp-compute-") and not mode.startswith("sp-instance-"):
+        # 默认为 compute SP
+        mode = mode.replace("sp-", "sp-compute-")
+    # 标准化年份表示：1y -> 1yr, 3y -> 3yr
+    return mode.replace("1y-", "1yr-").replace("3y-", "3yr-")
+
+
 # 中国区各托管服务实际可用的 Graviton 实例族
 # DocumentDB: 仅 r6g（无 r7g/m7g/m6g）
 # ElastiCache: r7g + m7g (xlarge+，无 m7g.large)
@@ -592,7 +605,7 @@ def merge_header_rows(row1: list, row2: list) -> list:
 
 # ── Excel 多 Sheet 处理 ────────────────────────────────────────────────────
 
-def process_sheet(ws, sheet_name: str, region: str) -> list[dict]:
+def process_sheet(ws, sheet_name: str, region: str, billing_mode: str = "on-demand") -> list[dict]:
     """处理单个 Excel Sheet，返回标准化条目列表"""
     rows_raw = list(ws.iter_rows(values_only=True))
     if not rows_raw:
@@ -634,7 +647,7 @@ def process_sheet(ws, sheet_name: str, region: str) -> list[dict]:
         if cls == "data":
             if current_roles:
                 item = build_item(
-                    rows[i], current_roles, sheet_name, current_section, region
+                    rows[i], current_roles, sheet_name, current_section, region, billing_mode
                 )
                 if item:
                     items.append(item)
@@ -650,7 +663,7 @@ def process_sheet(ws, sheet_name: str, region: str) -> list[dict]:
 
 
 def build_item(row_values: list, column_roles: dict[int, str],
-               sheet_name: str, section: str, region: str) -> dict | None:
+               sheet_name: str, section: str, region: str, billing_mode: str = "on-demand") -> dict | None:
     """根据列角色映射，从数据行构建标准化条目"""
     # 按角色收集值（同角色多列合并）
     role_values: dict[str, str] = {}
@@ -743,7 +756,20 @@ def build_item(row_values: list, column_roles: dict[int, str],
     engine_info = detect_engine(all_text)
 
     # ── 计费模式 ──
-    billing_mode = "on-demand"
+    # 混合模式支持：ri-sp 表示 EC2 用 SP，其他服务用 RI
+    item_billing_mode = billing_mode
+    if billing_mode.startswith("ri-sp-"):
+        # 提取基础配置：ri-sp-1y-no-upfront -> 1y-no-upfront
+        base_config = billing_mode.replace("ri-sp-", "")
+        if service_code == "AmazonEC2":
+            # EC2 使用对应的 SP
+            item_billing_mode = normalize_billing_mode(f"sp-{base_config}")
+        else:
+            # 其他服务使用 RI
+            item_billing_mode = normalize_billing_mode(f"ri-{base_config}")
+    else:
+        # 非混合模式：标准化简化名称
+        item_billing_mode = normalize_billing_mode(billing_mode)
 
     # ── 构建备注（仅系统生成信息，不重复原始需求）──
     notes_parts: list[str] = []
@@ -773,7 +799,7 @@ def build_item(row_values: list, column_roles: dict[int, str],
         "os": "Linux" if service_code == "AmazonEC2" else "",
         "engine": engine,
         "storage_gb": str(spec_info["storage_gb"]) if spec_info.get("storage_gb") else "",
-        "billing_mode": billing_mode,
+        "billing_mode": item_billing_mode,
         "notes": "; ".join(notes_parts) if notes_parts else "",
         "original_request": original_request,
         "section": section,
@@ -840,7 +866,7 @@ def build_item(row_values: list, column_roles: dict[int, str],
     return result
 
 
-def load_excel(input_path: str, region: str) -> list[dict]:
+def load_excel(input_path: str, region: str, billing_mode: str = "on-demand") -> list[dict]:
     """加载 Excel 文件，多 Sheet 智能解析"""
     try:
         import openpyxl
@@ -855,7 +881,7 @@ def load_excel(input_path: str, region: str) -> list[dict]:
     for ws_name in wb.sheetnames:
         ws = wb[ws_name]
         print(f"[INFO] 处理 Sheet: '{ws_name}'", file=sys.stderr)
-        items = process_sheet(ws, ws_name, region)
+        items = process_sheet(ws, ws_name, region, billing_mode)
         if items:
             print(f"  → {len(items)} 条有效记录", file=sys.stderr)
             all_items.extend(items)
@@ -877,13 +903,28 @@ def normalize_columns(row: dict) -> dict:
     return result
 
 
-def process_csv_row(row: dict, region: str) -> dict | None:
+def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> dict | None:
     """处理 CSV 单行，返回标准化条目（兼容旧格式）"""
     norm = normalize_columns(row)
 
     orig_svc = norm.get("service", "")
     orig_spec = norm.get("spec", "")
     original_request = " ".join(filter(None, [orig_svc, orig_spec])).strip()
+
+    # 处理混合计费模式（在透传之前）
+    item_billing_mode = billing_mode
+    if billing_mode.startswith("ri-sp-"):
+        # 提取基础配置：ri-sp-1y-no-upfront -> 1y-no-upfront
+        base_config = billing_mode.replace("ri-sp-", "")
+        if orig_svc == "AmazonEC2":
+            # EC2 使用对应的 SP
+            item_billing_mode = normalize_billing_mode(f"sp-{base_config}")
+        else:
+            # 其他服务使用 RI
+            item_billing_mode = normalize_billing_mode(f"ri-{base_config}")
+    else:
+        # 非混合模式：标准化简化名称
+        item_billing_mode = normalize_billing_mode(billing_mode)
 
     # 已经是标准 ServiceCode → 透传
     known_codes = {sc for _, sc, _ in SERVICE_RULES}
@@ -898,7 +939,7 @@ def process_csv_row(row: dict, region: str) -> dict | None:
             "os": norm.get("os", ""),
             "engine": norm.get("engine", ""),
             "storage_gb": norm.get("storage_gb", ""),
-            "billing_mode": norm.get("billing_mode", "on-demand"),
+            "billing_mode": norm.get("billing_mode", item_billing_mode),
             "notes": norm.get("notes", ""),
             "original_request": original_request,
             "section": "",
@@ -927,6 +968,21 @@ def process_csv_row(row: dict, region: str) -> dict | None:
 
     engine_info = detect_engine(all_text)
 
+    # 处理混合计费模式
+    item_billing_mode = billing_mode
+    if billing_mode.startswith("ri-sp-"):
+        # 提取基础配置：ri-sp-1y-no-upfront -> 1y-no-upfront
+        base_config = billing_mode.replace("ri-sp-", "")
+        if service_code == "AmazonEC2":
+            # EC2 使用对应的 SP
+            item_billing_mode = normalize_billing_mode(f"sp-{base_config}")
+        else:
+            # 其他服务使用 RI
+            item_billing_mode = normalize_billing_mode(f"ri-{base_config}")
+    else:
+        # 非混合模式：标准化简化名称
+        item_billing_mode = normalize_billing_mode(billing_mode)
+
     result = {
         "sheet_name": "",
         "service": service_code,
@@ -937,7 +993,7 @@ def process_csv_row(row: dict, region: str) -> dict | None:
         "os": norm.get("os", "Linux") if service_code == "AmazonEC2" else norm.get("os", ""),
         "engine": norm.get("engine", "") or engine_info.get("engine", ""),
         "storage_gb": norm.get("storage_gb", ""),
-        "billing_mode": norm.get("billing_mode", "on-demand"),
+        "billing_mode": norm.get("billing_mode", item_billing_mode),
         "notes": norm.get("notes", ""),
         "original_request": original_request,
         "section": "",
@@ -975,16 +1031,16 @@ def load_csv_file(input_path: str, region: str) -> list[dict]:
     return items
 
 
-def load_input(input_path: str, region: str) -> list[dict]:
+def load_input(input_path: str, region: str, billing_mode: str = "on-demand") -> list[dict]:
     """加载输入文件。Excel 使用智能多 Sheet 解析，CSV 使用兼容模式。"""
     path = Path(input_path)
     if path.suffix in (".xlsx", ".xls"):
-        return load_excel(input_path, region)
+        return load_excel(input_path, region, billing_mode)
     else:
         raw_rows = load_csv_file(input_path, region)
         items = []
         for i, row in enumerate(raw_rows, 1):
-            result = process_csv_row(row, region)
+            result = process_csv_row(row, region, billing_mode)
             if result:
                 items.append(result)
             else:
@@ -1431,6 +1487,14 @@ def main():
                         help="含 6%% 增值税")
     parser.add_argument("--customer", default="",
                         help="客户名称（报价单用）")
+    parser.add_argument("--billing-mode", "-b", default="on-demand",
+                        choices=["on-demand", "ri-1y-no-upfront", "ri-1y-partial", "ri-1y-all",
+                                "ri-3y-no-upfront", "ri-3y-partial", "ri-3y-all",
+                                "sp-1y-no-upfront", "sp-1y-partial", "sp-1y-all",
+                                "sp-3y-no-upfront", "sp-3y-partial", "sp-3y-all",
+                                "ri-sp-1y-no-upfront", "ri-sp-1y-partial", "ri-sp-1y-all",
+                                "ri-sp-3y-no-upfront", "ri-sp-3y-partial", "ri-sp-3y-all"],
+                        help="计费模式 (默认: on-demand)")
     args = parser.parse_args()
 
     # 默认输出 Excel 报价单
@@ -1444,7 +1508,7 @@ def main():
         import query_price
         query_price.AWS_PROFILE = args.profile
 
-    items = load_input(args.input, args.region)
+    items = load_input(args.input, args.region, args.billing_mode)
     if not items:
         print("[ERROR] 输入文件为空或无有效数据", file=sys.stderr)
         sys.exit(1)

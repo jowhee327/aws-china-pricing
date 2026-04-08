@@ -27,7 +27,7 @@ SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from query_price import (
     query_api, query_cache, extract_pricing,
-    RI_TERM_MAP, REGION_OVERRIDE,
+    RI_TERM_MAP, SP_TERM_MAP, REGION_OVERRIDE, query_savings_plans,
 )
 
 
@@ -118,6 +118,17 @@ def load_workload(input_path: str) -> list[dict]:
         return items
 
 
+def normalize_billing_mode(billing_mode: str) -> str:
+    """标准化计费模式名称，支持完整和简化格式"""
+    if billing_mode.startswith("ri-"):
+        # 移除 -upfront 后缀（如果存在）
+        return billing_mode.replace("-upfront", "")
+    elif billing_mode.startswith("sp-"):
+        # 移除 -upfront 后缀（如果存在）
+        return billing_mode.replace("-upfront", "")
+    return billing_mode
+
+
 def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[dict]:
     """查询单个条目的价格"""
     service = item.get("service", "")
@@ -126,6 +137,9 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
 
     if not service:
         return None
+
+    # 标准化计费模式格式
+    normalized_mode = normalize_billing_mode(billing_mode)
 
     # 区域映射：某些服务只在特定区域有价格数据
     if service in REGION_OVERRIDE:
@@ -178,6 +192,7 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
         "on_demand_hourly": None,
         "ri_hourly": None,
         "ri_upfront": None,
+        "sp_hourly": None,
         "billing_mode": billing_mode,
     }
 
@@ -191,8 +206,8 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
             pass
 
     # 如果请求 RI 价格
-    if billing_mode.startswith("ri-"):
-        ri_config = RI_TERM_MAP.get(billing_mode)
+    if normalized_mode.startswith("ri-"):
+        ri_config = RI_TERM_MAP.get(normalized_mode)
         if ri_config:
             offering_class, lease, purchase_option = ri_config
             for ri in pricing.get("reserved", []):
@@ -214,6 +229,20 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
                     effective = (upfront / (years * 8760)) + hourly
                     result["ri_hourly"] = round(effective, 6)
                     result["ri_upfront"] = upfront
+                    break
+
+    # 如果请求 SP 价格
+    if normalized_mode.startswith("sp-"):
+        sp_config = SP_TERM_MAP.get(normalized_mode)
+        if sp_config and service == "AmazonEC2":
+            sp_type, lease, purchase_option = sp_config
+            # 查询 Savings Plans 价格
+            sp_data = query_savings_plans(region, instance_type)
+            for sp in sp_data:
+                if (sp["sp_type"] == sp_type and
+                    lease.replace("yr", "") in sp["term"] and
+                    sp["purchase_option"].lower() == purchase_option.lower()):
+                    result["sp_hourly"] = sp["hourly_rate"]
                     break
 
     return result
@@ -247,10 +276,13 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
     if billing_mode.startswith("ri-") and price_data.get("ri_hourly") is not None:
         hourly = price_data["ri_hourly"]
         upfront_per_unit = price_data.get("ri_upfront", 0)
+    elif billing_mode.startswith("sp-") and price_data.get("sp_hourly") is not None:
+        hourly = price_data["sp_hourly"]
+        upfront_per_unit = 0  # SP upfront 取决于承诺金额，不是每实例固定
     else:
         hourly = price_data.get("on_demand_hourly", 0) or 0
         upfront_per_unit = 0
-        if billing_mode != "on-demand" and billing_mode.startswith("ri-"):
+        if billing_mode != "on-demand" and (billing_mode.startswith("ri-") or billing_mode.startswith("sp-")):
             result["warning"] = f"未找到 {billing_mode} 价格，使用按需价格"
             billing_mode = "on-demand"
 

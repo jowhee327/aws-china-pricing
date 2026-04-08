@@ -104,6 +104,36 @@ python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
 
 # 指定输出路径
 python3 scripts/smart_import.py --input workload.xlsx --output quote.xlsx --region cn-north-1
+
+# 使用 1年期无预付的 RI 和 SP 混合模式计算（EC2 用 SP，其他服务用 RI）
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
+  --billing-mode ri-sp-1y-no-upfront
+
+# 使用标准 RI 1年部分预付
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
+  --billing-mode ri-1y-partial
+
+# 使用计算型 Savings Plans 1年无预付
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
+  --billing-mode sp-1y-no-upfront
+
+# 简化参数：-b 是 --billing-mode 的缩写
+python3 scripts/smart_import.py --input workload.xlsx -r cn-north-1 -b ri-3y-partial
+```
+
+**计费模式说明**：
+- `on-demand` — 按需付费（默认）
+- `ri-1y-no-upfront` — 标准RI 1年无预付
+- `ri-1y-partial` — 标准RI 1年部分预付  
+- `ri-1y-all` — 标准RI 1年全预付
+- `ri-3y-no-upfront` / `ri-3y-partial` / `ri-3y-all` — 标准RI 3年各种预付方式
+- `sp-1y-no-upfront` / `sp-1y-partial` / `sp-1y-all` — 计算型SP 1年各种预付方式
+- `sp-3y-no-upfront` / `sp-3y-partial` / `sp-3y-all` — 计算型SP 3年各种预付方式
+- `ri-sp-1y-no-upfront` — 混合模式：EC2 用 SP，其他服务用 RI（1年无预付）
+- `ri-sp-1y-partial` / `ri-sp-1y-all` — 混合模式 1年部分/全预付
+- `ri-sp-3y-no-upfront` / `ri-sp-3y-partial` / `ri-sp-3y-all` — 混合模式 3年各种预付方式
+
+> **注意**：简化名称会自动映射到标准名称（如 `ri-1y-partial` → `ri-standard-1yr-partial`，`sp-1y-no-upfront` → `sp-compute-1yr-no-upfront`）
 ```
 
 > **重要**：这是默认且唯一推荐的报价方式。不要分步调用 calculate_cost.py 或 generate_quote.py。
