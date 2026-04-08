@@ -75,7 +75,7 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     (["efs", "文件存储", "弹性文件服务", "弹性文件", "nfs", "nas",
       "file storage"], "AmazonEFS", {}),
     (["ebs", "块存储", "弹性块存储", "弹性块", "ssd存储", "通用ssd", "通用SSD",
-      "云盘", "block storage"], "AmazonEC2", {"productFamily": "Storage",
+      "云盘", "block storage"], "AmazonEBS", {"productFamily": "Storage",
                                               "volumeApiName": "gp3"}),
     (["对象存储", "s3", "oss", "object storage"], "AmazonS3", {}),
 
@@ -785,7 +785,7 @@ def build_item(row_values: list, column_roles: dict[int, str],
             result[k] = v
 
     # EBS 卷类型检测（从全文检测 gp3/gp2/io1 等）
-    if result.get("productFamily") == "Storage" and service_code == "AmazonEC2":
+    if result.get("productFamily") == "Storage" and service_code == "AmazonEBS":
         all_text_for_vol = " ".join(filter(None, [
             service_text, spec_text, description_text
         ]))
@@ -796,7 +796,7 @@ def build_item(row_values: list, column_roles: dict[int, str],
         result["os"] = ""
 
         # 在 notes 中标注卷类型
-        vol_note = f"volume_type={detected_vol}"
+        vol_note = f"{detected_vol}"
         if result["notes"]:
             result["notes"] = vol_note + "; " + result["notes"]
         else:

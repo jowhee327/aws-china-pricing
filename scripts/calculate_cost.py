@@ -140,7 +140,14 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
     # EBS Storage: 使用 productFamily + volumeApiName 过滤
     # 兼容 CSV 加载后 key 被 lowercase 的情况
     product_family = item.get("productFamily") or item.get("productfamily") or ""
-    if product_family == "Storage" and service == "AmazonEC2":
+
+    # EBS 映射：当 service=="AmazonEBS" 时，查价用 "AmazonEC2" + productFamily="Storage"
+    query_service = service
+    if service == "AmazonEBS":
+        query_service = "AmazonEC2"
+        product_family = "Storage"
+
+    if product_family == "Storage" and (service == "AmazonEC2" or service == "AmazonEBS"):
         user_filters["productFamily"] = "Storage"
         volume_api_name = (item.get("volumeApiName")
                            or item.get("volumeapiname") or "gp3")
@@ -158,9 +165,9 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
             user_filters["databaseEngine"] = item["engine"]
 
     # 查询 API，无结果时降级到本地缓存
-    products = query_api(service, region, user_filters, max_results=3)
+    products = query_api(query_service, region, user_filters, max_results=3)
     if not products:
-        products = query_cache(service, region, user_filters)
+        products = query_cache(query_service, region, user_filters)
     if not products:
         return None
 
@@ -254,7 +261,7 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
 
     # 计算成本
     product_family = item.get("productFamily") or item.get("productfamily") or ""
-    is_ebs_storage = (product_family == "Storage" and service == "AmazonEC2")
+    is_ebs_storage = (product_family == "Storage" and (service == "AmazonEC2" or service == "AmazonEBS"))
     if is_ebs_storage:
         # EBS: 价格单位是 per GB-month，不是 per hour
         storage_gb = float(item.get("storage_gb", 0) or 0)

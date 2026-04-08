@@ -128,6 +128,18 @@ BILLING_MODE_NAMES = {
     "ri-convertible-3yr-all": "可转换RI 3年 全预付",
 }
 
+SERVICE_DISPLAY_NAMES = {
+    "AmazonEBS": "EBS",
+    "AmazonEC2": "EC2",
+    "AmazonRDS": "RDS",
+    "AmazonElastiCache": "ElastiCache",
+    "AmazonS3": "S3",
+    "AmazonEFS": "EFS",
+    "AmazonCloudFront": "CloudFront",
+    "AWSELB": "ELB",
+    "AmazonVPC": "VPC",
+}
+
 
 def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title: str = ""):
     """向一个 worksheet 写入报价内容（表头 + 数据 + 合计）"""
@@ -195,6 +207,7 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
         billing_name = BILLING_MODE_NAMES.get(
             r.get("billing_mode", ""), r.get("billing_mode", ""))
         region_name = REGION_NAMES.get(r.get("region", ""), r.get("region", ""))
+        service_name = SERVICE_DISPLAY_NAMES.get(r.get("service", ""), r.get("service", ""))
         discounts_note = ", ".join(r.get("applied_discounts", []))
         notes = r.get("notes", "")
         if discounts_note:
@@ -208,7 +221,7 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
 
         values = [
             idx,
-            r.get("service", ""),
+            service_name,
             r.get("instance_type", ""),
             region_name,
             r.get("quantity", 1),
