@@ -48,7 +48,22 @@ region = cn-north-1
 
 ## 快速开始
 
-### 0. 智能导入（自然语言输入）
+### 0. 一键生成 Excel 报价单（推荐）
+
+输入 Excel/CSV，一条命令直接输出正式 Excel 报价单：
+
+```bash
+# 最简用法：输入 Excel，输出 {文件名}_报价单.xlsx
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1
+
+# 指定客户名称
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+  --customer “客户公司名称”
+
+# 含 6% 增值税
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+  --include-tax
+```
 
 不需要知道精确的 AWS ServiceCode，直接描述你的需求：
 
@@ -61,18 +76,10 @@ Redis缓存,4G内存,3,Session缓存
 Kafka消息队列,,2,异步消息
 ```
 
-```bash
-# 转换为标准格式
-python3 scripts/smart_import.py --input raw_workload.csv --output standardized.csv --region cn-north-1
-
-# 或直接计算成本
-python3 scripts/smart_import.py --input raw_workload.csv --region cn-north-1 --calculate
-```
-
 支持 80+ 条映射规则，覆盖全部 95 个中国区服务，自动识别：
-- 引擎类型：“MySQL” → engine=MySQL，“Redis” → engine=Redis
-- 实例规格：“8C16G” → vCPU=8, memory=16 → 自动推荐最优实例
-- 存储容量：“1TB” → storage_gb=1024
+- 引擎类型：”MySQL” → engine=MySQL，”Redis” → engine=Redis
+- 实例规格：”8C16G” → vCPU=8, memory=16 → 自动推荐最优实例
+- 存储容量：”1TB” → storage_gb=1024
 
 ### 1. 查询单个服务价格
 

@@ -48,7 +48,22 @@ region = cn-north-1
 
 ## Quick Start
 
-### 0. Smart Import (Natural Language Input)
+### 0. One-Click Excel Quote (Recommended)
+
+Input Excel/CSV with natural language descriptions, output a professional Excel quote in one command:
+
+```bash
+# Simplest: input Excel → output {filename}_报价单.xlsx
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1
+
+# With customer name
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+  --customer "ACME Corp"
+
+# Include 6% VAT
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+  --include-tax
+```
 
 Don't know the exact AWS service codes? Just describe what you need:
 
@@ -59,14 +74,6 @@ MySQL数据库,4C32G,2,业务库
 Redis缓存,4G内存,3,Session缓存
 对象存储,1TB,,文件存储
 Kafka消息队列,,2,异步消息
-```
-
-```bash
-# Convert to standardized format
-python3 scripts/smart_import.py --input raw_workload.csv --output standardized.csv --region cn-north-1
-
-# Or directly calculate costs
-python3 scripts/smart_import.py --input raw_workload.csv --region cn-north-1 --calculate
 ```
 
 Supports 80+ mapping rules covering all 95 China region services in Chinese/English, with auto-detection of:

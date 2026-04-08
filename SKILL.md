@@ -86,7 +86,28 @@ python3 scripts/recommend_instance.py --vcpu 8 --memory 32 --workload gpu --regi
 - `storage` — 存储密集型 (i3, d2, d3 等)
 - `gpu` — GPU 实例 (p3, g4dn, g5 等)
 
-### 4. 批量成本计算（含数据传输费）
+### 4. 一键生成 Excel 报价单（推荐）
+
+输入 Excel/CSV，直接输出 Excel 报价单（smart_import → calculate_cost → generate_quote 一步到位）：
+
+```bash
+# 最简用法：输入 Excel，输出 {文件名}_报价单.xlsx
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1
+
+# 指定客户名称
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+  --customer "客户名称"
+
+# 含税报价
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --profile cn-north-1 \
+  --include-tax
+
+# 指定输出路径
+python3 scripts/smart_import.py --input workload.xlsx --output quote.xlsx --region cn-north-1 \
+  --profile cn-north-1
+```
+
+### 5. 批量成本计算（高级用法）
 
 通过 CSV 文件批量计算：
 
@@ -120,7 +141,7 @@ DataTransfer,,cn-north-1,1,,,,,,,cross_az,1000
 - `same_region` — 同区域内传输（免费）
 - `cloudfront` — CloudFront 分发（阶梯定价）
 
-### 5. 生成 Excel 报价单
+### 6. 单独生成 Excel 报价单（高级用法）
 
 ```bash
 python3 scripts/generate_quote.py --input workload.csv --region cn-north-1 \
@@ -128,7 +149,7 @@ python3 scripts/generate_quote.py --input workload.csv --region cn-north-1 \
   --discount-config discount-config.yaml --include-tax
 ```
 
-### 6. 更新价格数据缓存
+### 7. 更新价格数据缓存
 
 ```bash
 # 更新所有服务（含 Savings Plans）

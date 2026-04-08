@@ -259,6 +259,8 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
     ]
     if include_tax:
         notes_text.append("3. 以上金额已包含 6% 增值税。")
+    else:
+        notes_text.append("3. 以上价格不含 6% 增值税。")
     for i, note in enumerate(notes_text):
         cell = ws.cell(row=foot_row + i, column=1, value=note)
         cell.font = Font(name="微软雅黑", size=9, color="666666")
