@@ -588,7 +588,18 @@ def main():
             print(f"  {'数据传输费合计':<40} CNY {dt_total:>10,.2f}/月  CNY {dt_total * 12:>10,.2f}/年")
 
     if args.output:
-        save_csv(all_results, args.output)
+        if args.output.endswith('.xlsx'):
+            from generate_quote import generate_quote
+            gen_config = {
+                "customer": "",
+                "validity": 30,
+                "include_tax": args.include_tax,
+            }
+            wb = generate_quote(items, all_results, gen_config)
+            wb.save(args.output)
+            print(f"\n报价单已生成: {args.output}", file=sys.stderr)
+        else:
+            save_csv(all_results, args.output)
 
 
 if __name__ == "__main__":

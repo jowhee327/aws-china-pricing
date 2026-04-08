@@ -8,9 +8,19 @@
 - 增强服务映射（更多中文别名 + 应用层服务 fallback）
 - 规格智能提取（多格式支持）
 - 数量智能处理（公式、按量付费等）
+- 默认直接输出 Excel 报价单（smart_import → calculate_cost → generate_quote 一步到位）
 
 用法:
+  # 最简用法：输入 Excel，输出 Excel 报价单（默认输出 {输入文件名}_报价单.xlsx）
+  python3 smart_import.py --input LBS.xlsx --region cn-north-1 --profile cn-north-1
+
+  # 指定输出 Excel 报价单
+  python3 smart_import.py --input LBS.xlsx --output quote.xlsx --region cn-north-1
+
+  # 输出标准化 CSV（保留旧行为）
   python3 smart_import.py --input raw_workload.xlsx --output standardized.csv --region cn-north-1
+
+  # 终端输出模式（调用 calculate_cost.py）
   python3 smart_import.py --input raw_workload.csv --region cn-north-1 --calculate
 """
 
@@ -1246,6 +1256,70 @@ def print_csv(items: list[dict]):
     writer.writerows(items)
 
 
+def _output_excel(items: list[dict], args):
+    """计算成本并生成 Excel 报价单（一步到位）"""
+    sys.path.insert(0, str(Path(__file__).parent))
+    from calculate_cost import (
+        load_discount_config, get_price_for_item, calculate_item_cost,
+    )
+    from generate_quote import generate_quote
+
+    discount_config = load_discount_config(args.discount_config)
+
+    # 设置默认区域
+    for item in items:
+        if not item.get("region"):
+            item["region"] = args.region
+
+    # 逐条查询价格并计算成本
+    print("[INFO] 正在查询价格并计算成本...", file=sys.stderr)
+    results = []
+    for item in items:
+        billing_mode = item.get("billing_mode", "on-demand") or "on-demand"
+        print(f"  查询 {item.get('service', '')} {item.get('instance_type', '')} ...",
+              file=sys.stderr)
+        price_data = get_price_for_item(item, billing_mode=billing_mode)
+        if not price_data:
+            results.append({
+                "service": item.get("service", ""),
+                "instance_type": item.get("instance_type", ""),
+                "region": item.get("region", ""),
+                "quantity": int(item.get("quantity", 1) or 1),
+                "usage_hours": float(item.get("usage_hours", 720) or 720),
+                "billing_mode": billing_mode,
+                "hourly_list": 0, "hourly_after_discount": 0,
+                "monthly_per_unit": 0, "monthly_total": 0,
+                "upfront_total": 0, "yearly_total": 0,
+                "warning": "未找到价格",
+                "applied_discounts": [],
+                "notes": item.get("notes", ""),
+                "original_request": item.get("original_request", ""),
+                "currency": "CNY",
+            })
+            continue
+        cost = calculate_item_cost(item, price_data, discount_config, args.include_tax)
+        results.append(cost)
+
+    # 生成报价单
+    gen_config = {
+        "customer": args.customer,
+        "validity": 30,
+        "include_tax": args.include_tax,
+    }
+    wb = generate_quote(items, results, gen_config)
+    wb.save(args.output)
+
+    # 打印摘要
+    total_monthly = sum(r.get("monthly_total", 0) for r in results)
+    total_yearly = sum(r.get("yearly_total", 0) for r in results)
+    tax_label = "（含税）" if args.include_tax else "（不含税）"
+    print(f"\n[OK] 报价单已生成: {args.output}", file=sys.stderr)
+    print(f"\n摘要{tax_label}:", file=sys.stderr)
+    print(f"  条目数: {len(results)}", file=sys.stderr)
+    print(f"  月费用合计: CNY {total_monthly:,.2f}", file=sys.stderr)
+    print(f"  年费用合计: CNY {total_yearly:,.2f}", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AWS 中国区智能工作负载导入 v2 - 支持任意格式 Excel 多 Sheet"
@@ -1262,7 +1336,19 @@ def main():
                         help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
     parser.add_argument("--no-recommend", action="store_true",
                         help="跳过实例推荐（加速处理）")
+    parser.add_argument("--discount-config", "-d",
+                        default=str(Path(__file__).parent.parent / "discount-config.yaml"),
+                        help="折扣配置文件路径")
+    parser.add_argument("--include-tax", action="store_true",
+                        help="含 6%% 增值税")
+    parser.add_argument("--customer", default="",
+                        help="客户名称（报价单用）")
     args = parser.parse_args()
+
+    # 默认输出 Excel 报价单
+    if not args.output and not args.calculate:
+        input_path = Path(args.input)
+        args.output = str(input_path.parent / f"{input_path.stem}_报价单.xlsx")
 
     # 设置 AWS profile
     if args.profile:
@@ -1332,6 +1418,8 @@ def main():
         Path(tmp_path).unlink(missing_ok=True)
         sys.exit(result.returncode)
 
+    elif args.output and args.output.endswith(".xlsx"):
+        _output_excel(items, args)
     elif args.output:
         save_csv(items, args.output)
     else:
