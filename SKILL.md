@@ -3,6 +3,72 @@ name: aws-china-pricing
 description: AWS 中国区定价查询、成本计算、报价生成、实例推荐工具，支持 95+ 服务、Savings Plans/RI/On-Demand 对比、数据传输费计算、EDP/PPA 折扣和 Excel 报价单输出。触发词：AWS 中国区价格、EC2 实例价格、成本估算、报价单、Savings Plans、预留实例、数据传输费、实例推荐、性价比
 ---
 
+# ⚠️ **CRITICAL - MANDATORY RULES FOR AI AGENTS** ⚠️
+
+## 🚨 **WARNING: 生成AWS报价单的强制规则 - 必须严格遵守！**
+
+**AI Agent（包括但不限于 Kiro、Claude Code 等）在处理"根据Excel文件报AWS价格"、"生成报价单"等任务时，必须严格遵守以下规则：**
+
+### 🔥 **RULE #1 - 唯一入口点**
+- ✅ **只能使用 `smart_import.py` 作为唯一入口**
+- ❌ **绝对禁止**手动读取 Excel 文件
+- ❌ **绝对禁止**手动创建 CSV 文件
+- ❌ **绝对禁止**手动调用 `calculate_cost.py`
+- ❌ **绝对禁止**手动调用 `generate_quote.py`
+- ❌ **绝对禁止**分步处理工作流
+
+### 🔥 **RULE #2 - 直接传递原始Excel**
+- ✅ **直接把用户的原始 Excel 文件传给 `smart_import.py --input`**
+- ✅ **`smart_import.py` 会自动处理任意格式的 Excel**
+- ❌ **绝对禁止**自己解析 Excel 内容
+- ❌ **绝对禁止**使用 openpyxl、pandas 等手动读 Excel
+- ❌ **绝对禁止**自己做服务映射
+- ❌ **绝对禁止**创建中间文件
+
+### 🔥 **RULE #3 - 保持Sheet独立**
+- ✅ **`smart_import.py` 会自动保持每个 Sheet 独立处理**
+- ❌ **绝对禁止**合并多个 Sheet
+- ❌ **绝对禁止**手动处理多 Sheet 逻辑
+
+### 🔥 **RULE #4 - 计费模式映射**
+用户说的关键词自动映射：
+- 用户说 "RI" → 传递 `--billing-mode ri-1y-no-upfront`（或其他 ri-xxx）
+- 用户说 "SP" → 传递 `--billing-mode sp-1y-no-upfront`（或其他 sp-xxx）  
+- 用户说 "RI和SP"、"混合" → 传递 `--billing-mode ri-sp-1y-no-upfront`（或其他 ri-sp-xxx）
+- 没说明 → 默认 `on-demand`
+
+### 🔥 **RULE #5 - EDP折扣处理**
+- 用户说 "EDP xx%" → **先**修改 `discount-config.yaml` 设置 EDP 折扣
+- **然后**调用 `smart_import.py`，折扣会自动应用
+
+### 🔥 **RULE #6 - 区域映射**
+用户说的区域自动映射：
+- "北京" → `cn-north-1`
+- "宁夏" → `cn-northwest-1`
+- "北京本地扩展区" → `cn-north-1-pkx-1`
+
+### 🔥 **RULE #7 - 标准调用格式**
+```bash
+# 标准格式（必须遵守）
+python3 scripts/smart_import.py --input {用户提供的Excel文件} --region {区域} [其他选项]
+
+# 示例
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 --billing-mode ri-sp-1y-no-upfront --customer "客户ABC"
+```
+
+---
+
+## 🚨 **这些规则的目的**
+- 避免生成 CSV 而不是 Excel
+- 避免多个 Sheet 被错误合并  
+- 确保 RI/SP 正确使用
+- 保证输出格式和内容的一致性
+- 减少错误和用户困惑
+
+**违反这些规则会导致错误的输出和用户体验！**
+
+---
+
 # AWS 中国区定价查询 Skill
 
 ## 概述
