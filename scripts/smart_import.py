@@ -507,6 +507,8 @@ def main():
     parser.add_argument("--output", "-o", help="输出标准化 CSV 路径（不指定则输出到 stdout）")
     parser.add_argument("--region", "-r", default="cn-north-1", help="默认区域 (默认: cn-north-1)")
     parser.add_argument("--calculate", action="store_true", help="预处理后直接调用 calculate_cost.py 计算")
+    parser.add_argument("--profile", default=None,
+                       help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
     parser.add_argument("--no-recommend", action="store_true", help="跳过实例推荐（加速处理）")
     args = parser.parse_args()
 

@@ -161,8 +161,14 @@ def main():
                        choices=["general", "compute", "memory", "storage", "gpu"],
                        help="用途类型 (默认: general)")
     parser.add_argument("--top", "-n", type=int, default=10, help="显示前 N 个推荐 (默认: 10)")
+    parser.add_argument("--profile", default=None,
+                       help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
     parser.add_argument("--json", action="store_true", help="JSON 格式输出")
     args = parser.parse_args()
+    # 设置 profile
+    if args.profile:
+        import query_price
+        query_price.AWS_PROFILE = args.profile
 
     family_name = WORKLOAD_INSTANCE_FAMILIES.get(args.workload, "General purpose")
     print(f"正在查询 {args.workload} 类型实例（{family_name}）@ {args.region} ...",

@@ -476,7 +476,13 @@ def main():
     parser.add_argument("--compare", "-c", help="多方案对比，逗号分隔的计费模式")
     parser.add_argument("--include-tax", action="store_true", help="含 6%% 增值税")
     parser.add_argument("--json", action="store_true", help="JSON 格式输出")
+    parser.add_argument("--profile", default=None,
+                       help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
     args = parser.parse_args()
+    # 设置 profile
+    if args.profile:
+        import query_price
+        query_price.AWS_PROFILE = args.profile
 
     # 加载折扣配置
     discount_config = load_discount_config(args.discount_config)
