@@ -1024,7 +1024,14 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
         context = (notes + " " + item.get("original_request", "")).lower()
 
         want_t = any(kw in context for kw in ["t2", "t3", "t4g", "突发", "burstable"])
-        exclude_families = [] if want_t else ["t2", "t3", "t3a", "t4g"]
+        want_amd = any(kw in context for kw in ["amd", "c5a", "m5a", "r5a", "c6a", "m6a", "r6a"])
+        exclude_families = []
+        if not want_t:
+            exclude_families += ["t2", "t3", "t3a", "t4g"]
+        if not want_amd:
+            exclude_families += ["c5a", "c5ad", "m5a", "m5ad", "r5a", "r5ad",
+                                "c6a", "m6a", "r6a", "c7a", "m7a", "r7a",
+                                "hpc7a"]
 
         want_arm = any(kw in context for kw in ["arm", "graviton"])
         arch = "arm" if want_arm else "x86"
