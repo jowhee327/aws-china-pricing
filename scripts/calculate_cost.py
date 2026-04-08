@@ -136,10 +136,21 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
 
     # 构建过滤器
     user_filters = {}
-    if instance_type:
-        user_filters["instanceType"] = instance_type
-    if item.get("os"):
-        user_filters["operatingSystem"] = item["os"]
+
+    # EBS Storage: 使用 productFamily + volumeApiName 过滤
+    # 兼容 CSV 加载后 key 被 lowercase 的情况
+    product_family = item.get("productFamily") or item.get("productfamily") or ""
+    if product_family == "Storage" and service == "AmazonEC2":
+        user_filters["productFamily"] = "Storage"
+        volume_api_name = (item.get("volumeApiName")
+                           or item.get("volumeapiname") or "gp3")
+        user_filters["volumeApiName"] = volume_api_name
+    else:
+        if instance_type:
+            user_filters["instanceType"] = instance_type
+        if item.get("os"):
+            user_filters["operatingSystem"] = item["os"]
+
     if item.get("engine"):
         if service == "AmazonElastiCache":
             user_filters["cacheEngine"] = item["engine"]
@@ -242,7 +253,14 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
     )
 
     # 计算成本
-    monthly_per_unit = hourly_after_discount * usage_hours
+    product_family = item.get("productFamily") or item.get("productfamily") or ""
+    is_ebs_storage = (product_family == "Storage" and service == "AmazonEC2")
+    if is_ebs_storage:
+        # EBS: 价格单位是 per GB-month，不是 per hour
+        storage_gb = float(item.get("storage_gb", 0) or 0)
+        monthly_per_unit = hourly_after_discount * max(storage_gb, 1)
+    else:
+        monthly_per_unit = hourly_after_discount * usage_hours
     monthly_total = monthly_per_unit * quantity
     upfront_total = upfront_per_unit * quantity
 

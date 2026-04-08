@@ -74,8 +74,9 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     (["fsx", "windows文件", "lustre"], "AmazonFSx", {}),
     (["efs", "文件存储", "弹性文件服务", "弹性文件", "nfs", "nas",
       "file storage"], "AmazonEFS", {}),
-    (["ebs", "块存储", "弹性块存储", "ssd存储", "云盘",
-      "block storage"], "AmazonEC2", {"productFamily": "Storage"}),
+    (["ebs", "块存储", "弹性块存储", "弹性块", "ssd存储", "通用ssd", "通用SSD",
+      "云盘", "block storage"], "AmazonEC2", {"productFamily": "Storage",
+                                              "volumeApiName": "gp3"}),
     (["对象存储", "s3", "oss", "object storage"], "AmazonS3", {}),
 
     # ── 网络类 ──
@@ -191,6 +192,28 @@ ENGINE_HINTS = {
     "valkey": ("cacheEngine", "Valkey"),
 }
 
+# EBS 卷类型提示词
+EBS_VOLUME_HINTS: list[tuple[list[str], str]] = [
+    (["gp3"], "gp3"),
+    (["gp2"], "gp2"),
+    (["io2", "预置iops", "provisioned iops"], "io2"),
+    (["io1"], "io1"),
+    (["st1", "吞吐优化"], "st1"),
+    (["sc1", "冷hdd", "cold hdd"], "sc1"),
+    (["通用ssd", "通用SSD", "通用型ssd", "ssd存储", "快速存储"], "gp3"),
+]
+
+
+def detect_ebs_volume_type(text: str) -> str:
+    """从文本中检测 EBS 卷类型，默认 gp3"""
+    text_lower = text.lower()
+    for keywords, volume_type in EBS_VOLUME_HINTS:
+        for kw in keywords:
+            if kw in text_lower:
+                return volume_type
+    return "gp3"
+
+
 # 非AWS标准服务替代建议
 NON_STANDARD_SERVICE_SUGGESTIONS: dict[str, str] = {
     "云堡垒机": "建议使用 AWS Systems Manager Session Manager",
@@ -302,7 +325,8 @@ COLUMN_ALIASES = {
 # 标准输出列
 OUTPUT_FIELDS = [
     "sheet_name", "service", "instance_type", "region", "quantity", "usage_hours",
-    "os", "engine", "storage_gb", "billing_mode", "notes", "original_request", "section",
+    "os", "engine", "storage_gb", "billing_mode", "productFamily", "volumeApiName",
+    "notes", "original_request", "section",
 ]
 
 
@@ -721,14 +745,10 @@ def build_item(row_values: list, column_roles: dict[int, str],
     # ── 计费模式 ──
     billing_mode = "on-demand"
 
-    # ── 构建备注 ──
+    # ── 构建备注（仅系统生成信息，不重复原始需求）──
     notes_parts: list[str] = []
     if warning:
         notes_parts.append(f"[WARN] {warning}")
-    if business_text:
-        notes_parts.append(business_text)
-    if description_text:
-        notes_parts.append(description_text)
     if qty_note and qty_note != "按量付费":
         notes_parts.append(qty_note)
     if qty_note == "按量付费":
@@ -763,6 +783,24 @@ def build_item(row_values: list, column_roles: dict[int, str],
     for k, v in extra_fields.items():
         if k not in result or not result[k]:
             result[k] = v
+
+    # EBS 卷类型检测（从全文检测 gp3/gp2/io1 等）
+    if result.get("productFamily") == "Storage" and service_code == "AmazonEC2":
+        all_text_for_vol = " ".join(filter(None, [
+            service_text, spec_text, description_text
+        ]))
+        detected_vol = detect_ebs_volume_type(all_text_for_vol)
+        if detected_vol:
+            result["volumeApiName"] = detected_vol
+        # EBS 不需要 os 字段
+        result["os"] = ""
+
+        # 在 notes 中标注卷类型
+        vol_note = f"volume_type={detected_vol}"
+        if result["notes"]:
+            result["notes"] = vol_note + "; " + result["notes"]
+        else:
+            result["notes"] = vol_note
 
     # 缓存引擎覆盖
     if "cacheEngine" in engine_info and service_code == "AmazonElastiCache":
