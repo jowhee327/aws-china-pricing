@@ -1377,7 +1377,6 @@ def _output_excel(items: list[dict], args):
                 "hourly_list": 0, "hourly_after_discount": 0,
                 "monthly_per_unit": 0, "monthly_total": 0,
                 "upfront_total": 0, "yearly_total": 0,
-                "warning": "未找到价格",
                 "applied_discounts": [],
                 "notes": item.get("notes", ""),
                 "original_request": item.get("original_request", ""),

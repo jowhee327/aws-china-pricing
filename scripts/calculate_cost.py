@@ -574,8 +574,6 @@ def main():
         print(f"  查询 {item.get('service', '')} {item.get('instance_type', '')} ...", file=sys.stderr)
         price_data = get_price_for_item(item, billing_mode=billing_mode)
         if not price_data:
-            print(f"  [WARN] 未找到价格: {item.get('service', '')} {item.get('instance_type', '')}",
-                  file=sys.stderr)
             results.append({
                 "service": item.get("service", ""),
                 "instance_type": item.get("instance_type", ""),
@@ -585,7 +583,6 @@ def main():
                 "hourly_list": 0, "hourly_after_discount": 0,
                 "monthly_per_unit": 0, "monthly_total": 0,
                 "upfront_total": 0, "yearly_total": 0,
-                "warning": "未找到价格数据",
                 "applied_discounts": [],
                 "notes": item.get("notes", ""),
                 "original_request": item.get("original_request", ""),
