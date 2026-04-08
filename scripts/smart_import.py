@@ -70,8 +70,10 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
 
     # ── 网络类 ──
     (["cdn", "加速", "cloudfront", "内容分发"], "AmazonCloudFront", {}),
-    (["负载均衡", "lb", "alb", "nlb", "slb", "elb",
-      "load balancer"], "AWSELB", {}),
+    (["nlb", "network load balancer", "网络负载均衡"], "AWSELB", {"_lb_type": "NLB"}),
+    (["clb", "classic load balancer", "经典负载均衡"], "AWSELB", {"_lb_type": "CLB"}),
+    (["alb", "应用负载均衡", "application load balancer"], "AWSELB", {"_lb_type": "ALB"}),
+    (["负载均衡", "lb", "slb", "elb", "load balancer"], "AWSELB", {"_lb_type": "ALB"}),
     (["专线", "direct connect", "直连"], "AWSDirectConnect", {}),
     (["dns", "route53", "域名"], "AMAZONROUTE53REGIONALCHINA", {}),
     (["waf", "web防火墙"], "awswaf", {}),
@@ -191,6 +193,45 @@ SERVICES_NEED_SPEC = {
     "AmazonNeptune", "AmazonRedshift", "AmazonMemoryDB", "AmazonMQ",
     "AmazonES", "ElasticMapReduce",
 }
+
+# ── 托管服务 Graviton 实例映射 ────────────────────────────────────────────
+# EC2 保持 Intel，以下托管服务默认推荐最新代 Graviton (r7g/m7g)
+MANAGED_GRAVITON_SERVICES = {
+    "AmazonRDS", "AmazonDocDB", "AmazonNeptune",
+    "AmazonMemoryDB", "AmazonElastiCache", "AmazonES",
+}
+
+# 托管服务实例前缀
+MANAGED_SERVICE_PREFIX = {
+    "AmazonRDS": "db",
+    "AmazonDocDB": "db",
+    "AmazonNeptune": "db",
+    "AmazonMemoryDB": "db",
+    "AmazonElastiCache": "cache",
+    "AmazonES": "",  # OpenSearch: {family}.{size}.search
+}
+
+# Graviton r7g (memory-optimized) 规格表: (vcpu, memory_gib, size_name)
+GRAVITON_R7G_SPECS = [
+    (2, 16, "large"),
+    (4, 32, "xlarge"),
+    (8, 64, "2xlarge"),
+    (16, 128, "4xlarge"),
+    (32, 256, "8xlarge"),
+    (48, 384, "12xlarge"),
+    (64, 512, "16xlarge"),
+]
+
+# Graviton m7g (general-purpose) 规格表: (vcpu, memory_gib, size_name)
+GRAVITON_M7G_SPECS = [
+    (2, 8, "large"),
+    (4, 16, "xlarge"),
+    (8, 32, "2xlarge"),
+    (16, 64, "4xlarge"),
+    (32, 128, "8xlarge"),
+    (48, 192, "12xlarge"),
+    (64, 256, "16xlarge"),
+]
 
 
 # ── 列角色检测关键词 ──────────────────────────────────────────────────────
@@ -318,7 +359,7 @@ def extract_spec(text: str) -> dict:
     # 2. 独立内存 (没有 CPU 信息时): "8G", "8G-Cluster", "4G内存"
     if "memory" not in info:
         for mm in re.finditer(
-            r'(\d+)\s*[gG][iI]?[bB]?\s*(?:[-\s]|内存|memory|cluster)',
+            r'(\d+)\s*[gG][iI]?[bB]?\s*(?:[-\s]|内存|memory|cluster|$)',
             text, re.IGNORECASE
         ):
             start = mm.start()
@@ -702,6 +743,13 @@ def build_item(row_values: list, column_roles: dict[int, str],
         recommend_tag = f"recommend:{vcpu}c{mem}g"
         result["notes"] = (recommend_tag + " " + result["notes"]).strip() \
             if result["notes"] else recommend_tag
+    # Memory-only managed service → also set recommend tag for Graviton resolution
+    elif (spec_info.get("memory") and not result["instance_type"]
+          and service_code in MANAGED_GRAVITON_SERVICES):
+        mem = spec_info["memory"]
+        recommend_tag = f"recommend:0c{mem}g"
+        result["notes"] = (recommend_tag + " " + result["notes"]).strip() \
+            if result["notes"] else recommend_tag
 
     # 需要实例规格的服务但未检测到任何规格 → 提醒用户
     if (service_code in SERVICES_NEED_SPEC
@@ -712,6 +760,12 @@ def build_item(row_values: list, column_roles: dict[int, str],
         no_spec_warn = "⚠️ 未指定具体规格，已使用默认最低配置查价，请确认是否符合需求"
         result["notes"] = (result["notes"] + "; " + no_spec_warn).strip("; ") \
             if result["notes"] else no_spec_warn
+
+    # LB type annotation (ALB/NLB/CLB)
+    lb_type = extra_fields.get("_lb_type")
+    if lb_type and service_code == "AWSELB":
+        result["notes"] = (lb_type + "; " + result["notes"]).strip("; ") \
+            if result["notes"] else lb_type
 
     return result
 
@@ -991,10 +1045,64 @@ def _find_cheapest_instance(instances: list[dict],
     return min(candidates, key=lambda i: i["hourly_price"])
 
 
-def resolve_instance_recommendations(items: list[dict], region: str) -> list[dict]:
-    """对含有 recommend:XcYg 的 EC2 条目，自动推荐价格最低的匹配实例
+def _resolve_managed_graviton_instance(service: str, vcpu: int = 0,
+                                       memory: int = 0) -> tuple[str, str]:
+    """为托管服务选择最新代 Graviton 实例规格。
 
-    默认排除 t 系列（突发性能）和 Graviton (ARM) 实例，除非用户明确要求。
+    返回 (instance_type, description)。无匹配时返回 ("", "")。
+    """
+    prefix = MANAGED_SERVICE_PREFIX.get(service)
+    if prefix is None:
+        return "", ""
+
+    suffix = ".search" if service == "AmazonES" else ""
+
+    def _build_type(family: str, size: str) -> str:
+        if prefix:
+            return f"{prefix}.{family}.{size}"
+        return f"{family}.{size}{suffix}"
+
+    if vcpu > 0 and memory > 0:
+        # Both specified: r7g if memory >= vcpu*4, else m7g
+        if memory >= vcpu * 4:
+            family, specs = "r7g", GRAVITON_R7G_SPECS
+        else:
+            family, specs = "m7g", GRAVITON_M7G_SPECS
+        for sv, sm, sname in specs:
+            if sv >= vcpu and sm >= memory:
+                inst = _build_type(family, sname)
+                return inst, f"Graviton {family}.{sname} ({sv}vCPU/{sm}GiB)"
+        # Fallback: largest available
+        sv, sm, sname = specs[-1]
+        inst = _build_type(family, sname)
+        return inst, f"Graviton {family}.{sname} ({sv}vCPU/{sm}GiB, 最大可用)"
+    elif memory > 0:
+        # Memory-only: prefer r7g (memory-optimized)
+        for sv, sm, sname in GRAVITON_R7G_SPECS:
+            if sm >= memory:
+                inst = _build_type("r7g", sname)
+                return inst, f"Graviton r7g.{sname} ({sv}vCPU/{sm}GiB)"
+        sv, sm, sname = GRAVITON_R7G_SPECS[-1]
+        inst = _build_type("r7g", sname)
+        return inst, f"Graviton r7g.{sname} ({sv}vCPU/{sm}GiB, 最大可用)"
+    elif vcpu > 0:
+        # vCPU-only: use m7g (general purpose)
+        for sv, sm, sname in GRAVITON_M7G_SPECS:
+            if sv >= vcpu:
+                inst = _build_type("m7g", sname)
+                return inst, f"Graviton m7g.{sname} ({sv}vCPU/{sm}GiB)"
+        sv, sm, sname = GRAVITON_M7G_SPECS[-1]
+        inst = _build_type("m7g", sname)
+        return inst, f"Graviton m7g.{sname} ({sv}vCPU/{sm}GiB, 最大可用)"
+
+    return "", ""
+
+
+def resolve_instance_recommendations(items: list[dict], region: str) -> list[dict]:
+    """对含有 recommend:XcYg 的条目，自动推荐匹配实例。
+
+    EC2: 查询 Pricing API，推荐最新代 Intel（排除 t 系列和 Graviton）。
+    托管服务 (RDS/ElastiCache/等): 直接映射到最新代 Graviton 实例规格。
     """
     # 仅在有 EC2 推荐需求时查询 API（一次查询覆盖所有规格）
     need_ec2 = any(
@@ -1016,9 +1124,23 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
         service = item["service"]
 
         if service != "AmazonEC2":
-            item["notes"] = notes.replace(
-                m.group(0), f"需要{vcpu}vCPU/{memory}GiB"
-            ).strip()
+            if service in MANAGED_GRAVITON_SERVICES:
+                inst, desc = _resolve_managed_graviton_instance(
+                    service, vcpu, memory
+                )
+                if inst:
+                    item["instance_type"] = inst
+                    item["notes"] = notes.replace(
+                        m.group(0), f"自动推荐: {desc}"
+                    ).strip()
+                else:
+                    item["notes"] = notes.replace(
+                        m.group(0), f"需要{vcpu}vCPU/{memory}GiB"
+                    ).strip()
+            else:
+                item["notes"] = notes.replace(
+                    m.group(0), f"需要{vcpu}vCPU/{memory}GiB"
+                ).strip()
             continue
 
         # 检测用户是否要求 t 系列或 ARM/Graviton
