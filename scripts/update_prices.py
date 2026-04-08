@@ -23,13 +23,15 @@ CACHE_DIR = DATA_DIR / "cache"
 INDEX_DIR = DATA_DIR / "index"
 VERSION_FILE = DATA_DIR / "versions.json"
 
-AWS_PROFILE = os.environ.get("AWS_PROFILE", "default")
+AWS_PROFILE = os.environ.get("AWS_PROFILE", "")
 PRICING_REGION = "cn-northwest-1"
 
 
 def run_aws_cli(args: list[str], timeout: int = 120) -> Optional[dict]:
     """执行 AWS CLI 命令并返回 JSON 结果"""
-    cmd = ["aws"] + args + ["--region", PRICING_REGION, "--profile", AWS_PROFILE, "--output", "json"]
+    cmd = ["aws"] + args + ["--region", PRICING_REGION, "--output", "json"]
+    if AWS_PROFILE:
+        cmd += ["--profile", AWS_PROFILE]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
@@ -236,7 +238,7 @@ def main():
     parser.add_argument("--region", "-r", default="cn-north-1",
                        help="目标区域 (默认: cn-north-1)")
     parser.add_argument("--profile", default=None,
-                       help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
+                       help="AWS CLI profile (默认: 不指定则用 AWS CLI 默认配置)")
     parser.add_argument("--services", "-s", help="指定服务（逗号分隔），不指定则更新所有")
     parser.add_argument("--force", "-f", action="store_true", help="强制更新（忽略版本检查）")
     parser.add_argument("--list-versions", action="store_true", help="列出本地缓存版本")

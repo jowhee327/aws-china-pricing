@@ -30,7 +30,7 @@ DATA_DIR = SCRIPT_DIR.parent / "data"
 CACHE_DIR = DATA_DIR / "cache"
 INDEX_DIR = DATA_DIR / "index"
 
-AWS_PROFILE = os.environ.get("AWS_PROFILE", "default")
+AWS_PROFILE = os.environ.get("AWS_PROFILE", "")
 PRICING_REGION = "cn-northwest-1"
 
 # 服务定价区域映射：某些服务只在特定区域有价格数据
@@ -79,7 +79,9 @@ RI_TERM_MAP = {
 def run_aws_cli(args: list[str], timeout: int = 30, profile: str = None) -> Optional[dict]:
     """执行 AWS CLI 命令并返回 JSON 结果"""
     _profile = profile or AWS_PROFILE
-    cmd = ["aws"] + args + ["--region", PRICING_REGION, "--profile", _profile, "--output", "json"]
+    cmd = ["aws"] + args + ["--region", PRICING_REGION, "--output", "json"]
+    if _profile:
+        cmd += ["--profile", _profile]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
@@ -592,7 +594,7 @@ def main():
                        choices=["cn-north-1", "cn-northwest-1", "cn-north-1-pkx-1"],
                        help="区域代码 (默认: cn-north-1)")
     parser.add_argument("--profile", default=None,
-                       help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
+                       help="AWS CLI profile (默认: 不指定则用 AWS CLI 默认配置)")
     parser.add_argument("--filters", "-f", nargs="*", default=[],
                        help="过滤器 key=value 格式 (如 instanceType=c6i.xlarge)")
     parser.add_argument("--list-services", action="store_true", help="列出所有可用服务")

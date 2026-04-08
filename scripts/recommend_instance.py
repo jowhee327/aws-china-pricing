@@ -188,7 +188,7 @@ def main():
                        help="用途类型 (默认: general)")
     parser.add_argument("--top", "-n", type=int, default=10, help="显示前 N 个推荐 (默认: 10)")
     parser.add_argument("--profile", default=None,
-                       help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
+                       help="AWS CLI profile (默认: 不指定则用 AWS CLI 默认配置)")
     parser.add_argument("--exclude-families",
                        default="t2,t3,t3a,t4g,c4,c5,c5d,c5n,c5a,c5ad,m4,m5,m5d,m5n,m5dn,m5a,m5ad,r4,r5,r5d,r5n,r5dn,r5a,r5ad,c6a,m6a,r6a,c7a,m7a,r7a,i3,i3en,d2,h1,p3,g3,g3s,x1,x1e,z1d,hpc7a",
                        help="排除的实例族前缀，逗号分隔 (默认排除t系列/旧代Intel/AMD，传空字符串可清除)")

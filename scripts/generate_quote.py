@@ -329,7 +329,7 @@ def main():
     parser.add_argument("--include-tax", action="store_true", help="含 6%% 增值税")
     parser.add_argument("--compare", "-c", help="对比计费模式（逗号分隔）")
     parser.add_argument("--profile", default=None,
-                       help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
+                       help="AWS CLI profile (默认: 不指定则用 AWS CLI 默认配置)")
     args = parser.parse_args()
     # 设置 profile
     if args.profile:

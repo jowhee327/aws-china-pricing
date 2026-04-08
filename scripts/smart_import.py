@@ -1382,7 +1382,7 @@ def main():
     parser.add_argument("--calculate", action="store_true",
                         help="预处理后直接调用 calculate_cost.py 计算")
     parser.add_argument("--profile", default=None,
-                        help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
+                        help="AWS CLI profile (默认: 不指定则用 AWS CLI 默认配置)")
     parser.add_argument("--no-recommend", action="store_true",
                         help="跳过实例推荐（加速处理）")
     parser.add_argument("--discount-config", "-d",
