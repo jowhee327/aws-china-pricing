@@ -353,9 +353,9 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
                          ("EBS" in service_name or r.get("service", "") == "AmazonEBS"))
 
         if is_ebs_storage:
-            # EBS 存储：显示 storage_gb 和 monthly_per_unit
+            # EBS 存储：F列显示 storage_gb，H列显示 GB月单价
             usage_display = r.get("storage_gb", 0)
-            price_display = monthly_per_unit
+            price_display = hourly  # per GB-month 单价
         else:
             # 其他服务：显示 usage_hours 和 hourly
             usage_display = r.get("usage_hours", 720)
@@ -387,8 +387,8 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
                          ("EBS" in service_name or r.get("service", "") == "AmazonEBS"))
 
         if is_ebs_storage:
-            # EBS 存储：月费/台 = monthly_per_unit (已算好的 GB-month 价格)
-            cell_monthly_unit.value = r.get("monthly_per_unit", 0)
+            # EBS 存储：月费/台 = GB月单价(H列) × GB数(F列)
+            cell_monthly_unit.value = f"=H{row_num}*F{row_num}"
         else:
             # 其他服务：月费/台 = 小时单价 * 月使用时长
             cell_monthly_unit.value = f"=H{row_num}*F{row_num}"
