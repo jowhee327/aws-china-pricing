@@ -2,6 +2,7 @@
 """AWS 中国区 Excel 报价单生成工具
 
 从 CSV/Excel 工作负载生成正式的 Excel 报价单，含客户名、有效期、明细、汇总。
+支持多 Sheet 输出（按原始 sheet_name 分组，每个 sheet 内按 section 分组显示）。
 
 用法:
   python3 generate_quote.py --input workload.csv --region cn-north-1 \
@@ -17,6 +18,7 @@
 
 import argparse
 import sys
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -44,6 +46,8 @@ NORMAL_FONT = Font(name="微软雅黑", size=10)
 BOLD_FONT = Font(name="微软雅黑", size=10, bold=True)
 TOTAL_FILL = PatternFill(start_color="D6E4F0", end_color="D6E4F0", fill_type="solid")
 TOTAL_FONT = Font(name="微软雅黑", size=11, bold=True, color="1F4E79")
+SECTION_FILL = PatternFill(start_color="E8F0FE", end_color="E8F0FE", fill_type="solid")
+SECTION_FONT = Font(name="微软雅黑", size=10, bold=True, color="1F4E79")
 THIN_BORDER = Border(
     left=Side(style="thin", color="CCCCCC"),
     right=Side(style="thin", color="CCCCCC"),
@@ -88,6 +92,20 @@ def write_total_row(ws, row: int, values: list, formats: list = None):
             cell.number_format = formats[col - 1]
 
 
+def write_section_row(ws, row: int, section_name: str, n_cols: int):
+    """写入 section 分隔行"""
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
+    cell = ws.cell(row=row, column=1, value=section_name)
+    cell.font = SECTION_FONT
+    cell.fill = SECTION_FILL
+    cell.alignment = Alignment(vertical="center")
+    cell.border = THIN_BORDER
+    for col in range(2, n_cols + 1):
+        c = ws.cell(row=row, column=col)
+        c.fill = SECTION_FILL
+        c.border = THIN_BORDER
+
+
 REGION_NAMES = {
     "cn-north-1": "北京 (cn-north-1)",
     "cn-northwest-1": "宁夏 (cn-northwest-1)",
@@ -111,14 +129,8 @@ BILLING_MODE_NAMES = {
 }
 
 
-def generate_quote(items: list[dict], results: list[dict], config: dict):
-    """生成报价单"""
-    wb = Workbook()
-
-    # --- Sheet 1: 报价单 ---
-    ws = wb.active
-    ws.title = "报价单"
-
+def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title: str = ""):
+    """向一个 worksheet 写入报价内容（表头 + 数据 + 合计）"""
     customer = config.get("customer", "")
     validity = config.get("validity", 30)
     include_tax = config.get("include_tax", False)
@@ -129,8 +141,11 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
     set_col_widths(ws, [5, 15, 18, 16, 8, 10, 25, 14, 16, 16, 16, 14, 20, 25])
 
     # 标题区
+    title_text = "AWS 中国区云服务报价单"
+    if sheet_title:
+        title_text += f" - {sheet_title}"
     ws.merge_cells("A1:N1")
-    cell = ws.cell(row=1, column=1, value="AWS 中国区云服务报价单")
+    cell = ws.cell(row=1, column=1, value=title_text)
     cell.font = TITLE_FONT
     cell.alignment = Alignment(horizontal="center")
     ws.row_dimensions[1].height = 40
@@ -158,14 +173,27 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
     write_header_row(ws, header_row, headers)
     ws.row_dimensions[header_row].height = 30
 
-    # 明细数据
-    data_start = header_row + 1
+    # 明细数据（按 section 分组）
     fmt = [None, None, None, None, "#,##0", "#,##0", None,
            None, CNY_FORMAT, CNY_FORMAT, CNY_FORMAT, CNY_FORMAT, None, None]
 
-    for idx, r in enumerate(results, 1):
-        row_num = data_start + idx - 1
-        billing_name = BILLING_MODE_NAMES.get(r.get("billing_mode", ""), r.get("billing_mode", ""))
+    data_start = header_row + 1
+    current_row = data_start
+    idx = 0
+    current_section = None
+
+    for r in sheet_results:
+        # Section 分隔行
+        sec = r.get("section", "")
+        if sec and sec != current_section:
+            write_section_row(ws, current_row, sec, 14)
+            current_row += 1
+            current_section = sec
+
+        idx += 1
+        row_num = current_row
+        billing_name = BILLING_MODE_NAMES.get(
+            r.get("billing_mode", ""), r.get("billing_mode", ""))
         region_name = REGION_NAMES.get(r.get("region", ""), r.get("region", ""))
         discounts_note = ", ".join(r.get("applied_discounts", []))
         notes = r.get("notes", "")
@@ -193,35 +221,31 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
         write_data_row(ws, row_num, values, fmt)
 
         # 用公式替代硬编码数字
-        # I列=月费/台: =H*F (小时单价 × 月使用时长)
         cell_monthly_unit = ws.cell(row=row_num, column=9)
         cell_monthly_unit.value = f"=H{row_num}*F{row_num}"
         cell_monthly_unit.number_format = CNY_FORMAT
-        # J列=月费合计: =I*E (月费/台 × 数量)
         cell_monthly_total = ws.cell(row=row_num, column=10)
         cell_monthly_total.value = f"=I{row_num}*E{row_num}"
         cell_monthly_total.number_format = CNY_FORMAT
-        # K列=年费合计: =J*12
         cell_yearly = ws.cell(row=row_num, column=11)
         cell_yearly.value = f"=J{row_num}*12"
         cell_yearly.number_format = CNY_FORMAT
 
+        current_row += 1
+
     # 合计行用 SUM 公式
-    total_row = data_start + len(results)
+    total_row = current_row
     total_values = [
         "", "合计", "", "", "", "", "",
         "", "", None, None, None, "", "",
     ]
     write_total_row(ws, total_row, total_values, fmt)
-    # J列=月费合计 SUM
     ws.cell(row=total_row, column=10).value = f"=SUM(J{data_start}:J{total_row-1})"
     ws.cell(row=total_row, column=10).number_format = CNY_FORMAT
     ws.cell(row=total_row, column=10).font = TOTAL_FONT
-    # K列=年费合计 SUM
     ws.cell(row=total_row, column=11).value = f"=SUM(K{data_start}:K{total_row-1})"
     ws.cell(row=total_row, column=11).number_format = CNY_FORMAT
     ws.cell(row=total_row, column=11).font = TOTAL_FONT
-    # L列=预付 SUM
     ws.cell(row=total_row, column=12).value = f"=SUM(L{data_start}:L{total_row-1})"
     ws.cell(row=total_row, column=12).number_format = CNY_FORMAT
     ws.cell(row=total_row, column=12).font = TOTAL_FONT
@@ -238,16 +262,56 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
     for i, note in enumerate(notes_text):
         cell = ws.cell(row=foot_row + i, column=1, value=note)
         cell.font = Font(name="微软雅黑", size=9, color="666666")
-        ws.merge_cells(start_row=foot_row + i, start_column=1, end_row=foot_row + i, end_column=14)
+        ws.merge_cells(start_row=foot_row + i, start_column=1,
+                       end_row=foot_row + i, end_column=14)
 
-    # --- Sheet 2: 费率对比（如果有 RI 数据） ---
+
+def generate_quote(items: list[dict], results: list[dict], config: dict):
+    """生成报价单（支持多 Sheet）"""
+    wb = Workbook()
+
+    # 将 sheet_name/section 从 items 复制到 results
+    for i, item in enumerate(items):
+        if i < len(results):
+            results[i]["sheet_name"] = item.get("sheet_name", "")
+            results[i]["section"] = item.get("section", "")
+
+    # 按 sheet_name 分组（保留原始顺序）
+    groups: OrderedDict[str, list[dict]] = OrderedDict()
+    for r in results:
+        sheet = r.get("sheet_name", "")
+        if sheet not in groups:
+            groups[sheet] = []
+        groups[sheet].append(r)
+
+    # 只有一个分组且 sheet_name 为空 → 使用默认 "报价单" sheet
+    if len(groups) == 1 and "" in groups:
+        ws = wb.active
+        ws.title = "报价单"
+        _write_quote_sheet(ws, groups[""], config)
+    else:
+        # 多 sheet：每个 sheet_name 一个 worksheet
+        first = True
+        for sheet_name, sheet_results in groups.items():
+            display_name = sheet_name or "报价单"
+            # Excel sheet name 最长 31 字符
+            safe_name = display_name[:31]
+            if first:
+                ws = wb.active
+                ws.title = safe_name
+                first = False
+            else:
+                ws = wb.create_sheet(title=safe_name)
+            _write_quote_sheet(ws, sheet_results, config, sheet_title=display_name)
+
+    # 费率对比 sheet（如果有 RI 数据或指定了 --compare）
     has_ri = any(r.get("billing_mode", "").startswith("ri-") for r in results)
     if has_ri or config.get("compare"):
         ws2 = wb.create_sheet("计费模式对比")
         ws2.cell(row=1, column=1, value="各计费模式成本对比").font = TITLE_FONT
         ws2.merge_cells("A1:H1")
-        # Placeholder for comparison data — populated by compare mode
-        ws2.cell(row=3, column=1, value="详细对比数据请使用 --compare 参数生成").font = SUBTITLE_FONT
+        ws2.cell(row=3, column=1,
+                 value="详细对比数据请使用 --compare 参数生成").font = SUBTITLE_FONT
 
     return wb
 

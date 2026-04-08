@@ -22,7 +22,10 @@ import yaml
 
 SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
-from query_price import query_api, extract_pricing, calculate_effective_hourly, RI_TERM_MAP
+from query_price import (
+    query_api, query_cache, extract_pricing, calculate_effective_hourly,
+    RI_TERM_MAP, REGION_OVERRIDE,
+)
 
 
 def load_discount_config(config_path: str) -> dict:
@@ -118,6 +121,13 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
     if not service:
         return None
 
+    # 区域映射：某些服务只在特定区域有价格数据
+    if service in REGION_OVERRIDE:
+        override = REGION_OVERRIDE[service]
+        if override != region:
+            print(f"[INFO] {service} 使用 {override} 区域价格数据", file=sys.stderr)
+            region = override
+
     # 构建过滤器
     user_filters = {}
     if instance_type:
@@ -127,8 +137,10 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
     if item.get("engine"):
         user_filters["databaseEngine"] = item["engine"]
 
-    # 查询 API
+    # 查询 API，无结果时降级到本地缓存
     products = query_api(service, region, user_filters, max_results=3)
+    if not products:
+        products = query_cache(service, region, user_filters)
     if not products:
         return None
 
@@ -200,6 +212,8 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
         "notes": item.get("notes", ""),
         "original_request": item.get("original_request", ""),
         "currency": price_data.get("currency", "CNY"),
+        "sheet_name": item.get("sheet_name", ""),
+        "section": item.get("section", ""),
     }
 
     # 确定小时费率
@@ -298,10 +312,10 @@ def save_csv(results: list[dict], output_path: str):
         return
 
     fieldnames = [
-        "service", "instance_type", "region", "quantity", "usage_hours",
+        "sheet_name", "service", "instance_type", "region", "quantity", "usage_hours",
         "billing_mode", "currency", "hourly_list", "hourly_after_discount",
         "monthly_per_unit", "monthly_total", "upfront_total", "yearly_total",
-        "applied_discounts", "notes", "original_request", "warning",
+        "applied_discounts", "notes", "original_request", "section", "warning",
     ]
 
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -537,6 +551,8 @@ def main():
                 "notes": item.get("notes", ""),
                 "original_request": item.get("original_request", ""),
                 "currency": "CNY",
+                "sheet_name": item.get("sheet_name", ""),
+                "section": item.get("section", ""),
             })
             continue
 
