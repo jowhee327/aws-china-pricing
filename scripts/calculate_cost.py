@@ -118,15 +118,18 @@ def load_workload(input_path: str) -> list[dict]:
         return items
 
 
-def normalize_billing_mode(billing_mode: str) -> str:
-    """标准化计费模式名称，支持完整和简化格式"""
-    if billing_mode.startswith("ri-"):
-        # 移除 -upfront 后缀（如果存在）
-        return billing_mode.replace("-upfront", "")
-    elif billing_mode.startswith("sp-"):
-        # 移除 -upfront 后缀（如果存在）
-        return billing_mode.replace("-upfront", "")
-    return billing_mode
+def normalize_billing_mode(mode: str) -> str:
+    """将简化的计费模式名称标准化为完整名称（与smart_import.py保持一致）"""
+    # 处理简化名称：ri-1y-no-upfront -> ri-standard-1yr-no
+    if mode.startswith("ri-") and not mode.startswith("ri-sp-") and not mode.startswith("ri-standard-") and not mode.startswith("ri-convertible-"):
+        # 默认为 standard RI
+        mode = mode.replace("ri-", "ri-standard-")
+    if mode.startswith("sp-") and not mode.startswith("sp-compute-") and not mode.startswith("sp-instance-"):
+        # 默认为 compute SP
+        mode = mode.replace("sp-", "sp-compute-")
+    # 标准化年份表示：1y -> 1yr, 3y -> 3yr
+    # 移除 -upfront 后缀（如果存在）
+    return mode.replace("1y-", "1yr-").replace("3y-", "3yr-").replace("-upfront", "")
 
 
 def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[dict]:
@@ -160,6 +163,10 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
     if service == "AmazonEBS":
         query_service = "AmazonEC2"
         product_family = "Storage"
+        # EBS Storage 不支持 RI/SP，强制使用 on-demand
+        if normalized_mode != "on-demand":
+            print(f"[WARN] EBS Storage 不支持 {normalized_mode}，改用 on-demand", file=sys.stderr)
+            normalized_mode = "on-demand"
 
     if product_family == "Storage" and (service == "AmazonEC2" or service == "AmazonEBS"):
         user_filters["productFamily"] = "Storage"
@@ -234,7 +241,8 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
     # 如果请求 SP 价格
     if normalized_mode.startswith("sp-"):
         sp_config = SP_TERM_MAP.get(normalized_mode)
-        if sp_config and service == "AmazonEC2":
+        # SP 适用于 EC2, Lambda, ECS (与 smart_import.py 的 SP_APPLICABLE_SERVICES 保持一致)
+        if sp_config and service in {"AmazonEC2", "AWSLambda", "AmazonECS"}:
             sp_type, lease, purchase_option = sp_config
             # 查询 Savings Plans 价格
             sp_data = query_savings_plans(region, instance_type)
@@ -264,6 +272,8 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
         "region": item.get("region", "cn-north-1"),
         "quantity": quantity,
         "usage_hours": usage_hours,
+        "storage_gb": item.get("storage_gb", ""),
+        "productFamily": item.get("productFamily") or item.get("productfamily", ""),
         "billing_mode": billing_mode,
         "notes": item.get("notes", ""),
         "original_request": item.get("original_request", ""),
@@ -291,6 +301,11 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
         hourly, service, instance_family, discount_config
     )
 
+    # 对 upfront_per_unit 也应用折扣（EDP 折扣适用于全部账单包括 RI 预付）
+    upfront_per_unit_after_discount, _ = apply_discounts(
+        upfront_per_unit, service, instance_family, discount_config
+    )
+
     # 计算成本
     product_family = item.get("productFamily") or item.get("productfamily") or ""
     is_ebs_storage = (product_family == "Storage" and (service == "AmazonEC2" or service == "AmazonEBS"))
@@ -301,7 +316,7 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
     else:
         monthly_per_unit = hourly_after_discount * usage_hours
     monthly_total = monthly_per_unit * quantity
-    upfront_total = upfront_per_unit * quantity
+    upfront_total = upfront_per_unit_after_discount * quantity
 
     if include_tax:
         vat_rate = discount_config.get("tax", {}).get("vat_rate", 6) / 100

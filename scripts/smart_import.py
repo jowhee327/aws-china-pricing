@@ -230,7 +230,8 @@ SERVICES_NEED_SPEC = {
 # RI/SP 适用的服务
 RI_APPLICABLE_SERVICES = {
     "AmazonEC2", "AmazonRDS", "AmazonElastiCache", "AmazonRedshift",
-    "AmazonES", "AmazonDocDB", "AmazonNeptune", "AmazonMemoryDB", "AmazonDynamoDB"
+    "AmazonES", "AmazonDocDB", "AmazonNeptune", "AmazonMemoryDB"
+    # DynamoDB Reserved Capacity 已停售，不再支持 RI
 }
 
 SP_APPLICABLE_SERVICES = {
@@ -920,24 +921,41 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
     orig_spec = norm.get("spec", "")
     original_request = " ".join(filter(None, [orig_svc, orig_spec])).strip()
 
-    # 处理混合计费模式（在透传之前）
-    item_billing_mode = billing_mode
-    if billing_mode.startswith("ri-sp-"):
-        # 提取基础配置：ri-sp-1y-no-upfront -> 1y-no-upfront
-        base_config = billing_mode.replace("ri-sp-", "")
-        if orig_svc == "AmazonEC2":
-            # EC2 使用对应的 SP
-            item_billing_mode = normalize_billing_mode(f"sp-{base_config}")
-        else:
-            # 其他服务使用 RI
-            item_billing_mode = normalize_billing_mode(f"ri-{base_config}")
-    else:
-        # 非混合模式：标准化简化名称
-        item_billing_mode = normalize_billing_mode(billing_mode)
-
-    # 已经是标准 ServiceCode → 透传
+    # 已经是标准 ServiceCode → 透传（但需要检查 RI/SP 适用性）
     known_codes = {sc for _, sc, _ in SERVICE_RULES}
     if orig_svc and orig_svc in known_codes:
+        # 检查服务是否适用指定的计费模式（参考 build_item 中 line 761-791 的逻辑）
+        item_billing_mode = billing_mode
+        if billing_mode.startswith("ri-sp-"):
+            # 混合模式：ri-sp 表示 EC2/Fargate 用 SP，其他适用服务用 RI
+            base_config = billing_mode.replace("ri-sp-", "")
+            if orig_svc in SP_APPLICABLE_SERVICES:
+                # EC2/Lambda/Fargate 使用对应的 SP
+                item_billing_mode = normalize_billing_mode(f"sp-{base_config}")
+            elif orig_svc in RI_APPLICABLE_SERVICES:
+                # 其他适用服务使用 RI
+                item_billing_mode = normalize_billing_mode(f"ri-{base_config}")
+            else:
+                # 不适用 RI/SP 的服务，使用按需
+                item_billing_mode = "on-demand"
+        elif billing_mode.startswith("ri-"):
+            # RI 模式：只有适用的服务才使用 RI
+            if orig_svc in RI_APPLICABLE_SERVICES:
+                item_billing_mode = normalize_billing_mode(billing_mode)
+            else:
+                # 不适用 RI 的服务，使用按需
+                item_billing_mode = "on-demand"
+        elif billing_mode.startswith("sp-"):
+            # SP 模式：只有适用的服务才使用 SP
+            if orig_svc in SP_APPLICABLE_SERVICES:
+                item_billing_mode = normalize_billing_mode(billing_mode)
+            else:
+                # 不适用 SP 的服务，使用按需
+                item_billing_mode = "on-demand"
+        else:
+            # 非 RI/SP 模式：标准化简化名称
+            item_billing_mode = normalize_billing_mode(billing_mode)
+
         return {
             "sheet_name": "",
             "service": orig_svc,

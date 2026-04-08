@@ -138,7 +138,7 @@ BILLING_MODE_NAMES = {
     "sp-instance-3yr-no": "实例SP 3年 无预付",
     "sp-instance-3yr-partial": "实例SP 3年 部分预付",
     "sp-instance-3yr-all": "实例SP 3年 全预付",
-    "ri-sp-1yr-no-upfront": "混合模式 1年无预付 (EC2用SP，其他用RI)",
+    "ri-sp-1yr-no": "混合模式 1年无预付 (EC2用SP，其他用RI)",
 }
 
 SERVICE_DISPLAY_NAMES = {
@@ -303,8 +303,8 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
     # 明细表头
     header_row = 7
     headers = [
-        "序号", "服务", "实例类型", "区域", "数量", "月使用时长(h)",
-        "计费模式", "小时单价(CNY)", "月费/台(CNY)", "月费合计(CNY)",
+        "序号", "服务", "实例类型", "区域", "数量", "使用量",
+        "计费模式", "单价(CNY)", "月费/台(CNY)", "月费合计(CNY)",
         "年费合计(CNY)", "预付金额(CNY)", "备注", "原始需求",
     ]
     write_header_row(ws, header_row, headers)
@@ -342,8 +342,24 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
             notes = f"{notes} [{discounts_note}]" if notes else f"[{discounts_note}]"
 
         hourly = r.get("hourly_after_discount", 0)
+        monthly_per_unit = r.get("monthly_per_unit", 0)
         if include_tax:
             hourly = round(hourly * 1.06, 6)  # 6% 增值税
+            monthly_per_unit = round(monthly_per_unit * 1.06, 2)  # 6% 增值税
+
+        # 检查是否为 EBS 存储
+        product_family = r.get("productFamily") or r.get("productfamily") or ""
+        is_ebs_storage = (product_family == "Storage" and
+                         ("EBS" in service_name or r.get("service", "") == "AmazonEBS"))
+
+        if is_ebs_storage:
+            # EBS 存储：显示 storage_gb 和 monthly_per_unit
+            usage_display = r.get("storage_gb", 0)
+            price_display = monthly_per_unit
+        else:
+            # 其他服务：显示 usage_hours 和 hourly
+            usage_display = r.get("usage_hours", 720)
+            price_display = hourly
 
         values = [
             idx,
@@ -351,9 +367,9 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
             r.get("instance_type", ""),
             region_name,
             r.get("quantity", 1),
-            r.get("usage_hours", 720),
+            usage_display,
             billing_name,
-            hourly,
+            price_display,
             None,  # 月费/台 = 公式
             None,  # 月费合计 = 公式
             None,  # 年费合计 = 公式
@@ -365,8 +381,19 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
 
         # 用公式替代硬编码数字
         cell_monthly_unit = ws.cell(row=row_num, column=9)
-        cell_monthly_unit.value = f"=H{row_num}*F{row_num}"
+        # 检查是否为 EBS 存储：productFamily=="Storage" 且 service 包含 "EBS"
+        product_family = r.get("productFamily") or r.get("productfamily") or ""
+        is_ebs_storage = (product_family == "Storage" and
+                         ("EBS" in service_name or r.get("service", "") == "AmazonEBS"))
+
+        if is_ebs_storage:
+            # EBS 存储：月费/台 = monthly_per_unit (已算好的 GB-month 价格)
+            cell_monthly_unit.value = r.get("monthly_per_unit", 0)
+        else:
+            # 其他服务：月费/台 = 小时单价 * 月使用时长
+            cell_monthly_unit.value = f"=H{row_num}*F{row_num}"
         cell_monthly_unit.number_format = CNY_FORMAT
+
         cell_monthly_total = ws.cell(row=row_num, column=10)
         cell_monthly_total.value = f"=I{row_num}*E{row_num}"
         cell_monthly_total.number_format = CNY_FORMAT
