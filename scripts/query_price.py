@@ -197,7 +197,7 @@ def _filter_products(products: list[dict], user_filters: dict) -> list[dict]:
 
 
 def _search_cache_file(cache_file: Path, user_filters: dict, limit: int = 20) -> list[dict]:
-    """在缓存文件中搜索匹配产品（避免一次性加载大文件到内存）"""
+    """在缓存文件中搜索匹配产品"""
     matched = []
     with open(cache_file) as f:
         data = json.load(f)
@@ -690,11 +690,17 @@ def main():
                 print("费率对比 (SP vs RI vs On-Demand):")
                 print(format_comparison(rates))
     else:
+        on_demand_hr = 0
         for i, product in enumerate(products):
             if i > 0:
                 print("\n" + "=" * 60 + "\n")
             pricing = extract_pricing(product)
-            on_demand_hr = float(pricing.get("on_demand", {}).get("price", 0)) if pricing.get("on_demand") else 0
+            od = pricing.get("on_demand")
+            if od and od["price"] != "N/A":
+                try:
+                    on_demand_hr = float(od["price"])
+                except (ValueError, TypeError):
+                    on_demand_hr = 0
             print(format_output(pricing, verbose=args.verbose))
         if sp_data:
             print("\n" + format_sp_output(sp_data, on_demand_hourly=on_demand_hr))

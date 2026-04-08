@@ -26,7 +26,7 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from query_price import (
-    query_api, query_cache, extract_pricing, calculate_effective_hourly,
+    query_api, query_cache, extract_pricing,
     RI_TERM_MAP, REGION_OVERRIDE,
 )
 
@@ -141,7 +141,10 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
     if item.get("os"):
         user_filters["operatingSystem"] = item["os"]
     if item.get("engine"):
-        user_filters["databaseEngine"] = item["engine"]
+        if service == "AmazonElastiCache":
+            user_filters["cacheEngine"] = item["engine"]
+        else:
+            user_filters["databaseEngine"] = item["engine"]
 
     # 查询 API，无结果时降级到本地缓存
     products = query_api(service, region, user_filters, max_results=3)
@@ -526,15 +529,17 @@ def main():
         print(compare_modes(items, modes, discount_config, args.include_tax))
         return
 
-    # 逐条计算
+    # 逐条计算（all_results 保持与 items 顺序对齐，用于 generate_quote 索引匹配）
     results = []
     data_transfer_results = []
+    all_results = []
     for item in items:
         # 处理数据传输费条目
         if item.get("transfer_type"):
             dt_result = calculate_data_transfer_cost(item, discount_config, args.include_tax)
             if dt_result:
                 data_transfer_results.append(dt_result)
+                all_results.append(dt_result)
             continue
 
         billing_mode = item.get("billing_mode", "on-demand") or "on-demand"
@@ -560,13 +565,12 @@ def main():
                 "sheet_name": item.get("sheet_name", ""),
                 "section": item.get("section", ""),
             })
+            all_results.append(results[-1])
             continue
 
         cost = calculate_item_cost(item, price_data, discount_config, args.include_tax)
         results.append(cost)
-
-    # 合并数据传输结果
-    all_results = results + data_transfer_results
+        all_results.append(cost)
 
     # 输出
     if args.json:

@@ -243,6 +243,28 @@ GRAVITON_M7G_SPECS = [
     (64, 256, "16xlarge"),
 ]
 
+# Graviton r6g (memory-optimized, 上一代) — DocumentDB 中国区仅支持 r6g
+GRAVITON_R6G_SPECS = [
+    (2, 16, "large"),
+    (4, 32, "xlarge"),
+    (8, 64, "2xlarge"),
+    (16, 128, "4xlarge"),
+    (32, 256, "8xlarge"),
+    (48, 384, "12xlarge"),
+    (64, 512, "16xlarge"),
+]
+
+# 中国区各托管服务实际可用的 Graviton 实例族
+# DocumentDB: 仅 r6g（无 r7g/m7g/m6g）
+# ElastiCache: r7g + m7g (xlarge+，无 m7g.large)
+# 其他: r7g + m7g
+MANAGED_GRAVITON_FAMILY: dict[str, dict[str, tuple[str, list]]] = {
+    "AmazonDocDB": {
+        "r": ("r6g", GRAVITON_R6G_SPECS),
+        "m": ("r6g", GRAVITON_R6G_SPECS),  # DocDB 无 m 系列 Graviton，用 r6g
+    },
+}
+
 
 # ── 列角色检测关键词 ──────────────────────────────────────────────────────
 COLUMN_ROLE_KEYWORDS = {
@@ -1059,10 +1081,10 @@ def _find_cheapest_instance(instances: list[dict],
     # 根据 CPU:内存比例确定目标实例族
     if vcpu_need > 0 and memory_need > 0:
         ratio = memory_need / vcpu_need
-        if ratio <= 2:
-            preferred_prefix = "c"  # 计算优化
+        if ratio < 2:
+            preferred_prefix = "c"  # 计算优化 (1:1~1:2, 严格小于2)
         elif ratio <= 4:
-            preferred_prefix = "m"  # 通用
+            preferred_prefix = "m"  # 通用 (1:2~1:4, ratio=2 归 m 系列)
         else:
             preferred_prefix = "r"  # 内存优化
     else:
@@ -1084,6 +1106,8 @@ def _resolve_managed_graviton_instance(service: str, vcpu: int = 0,
     """为托管服务选择最新代 Graviton 实例规格。
 
     返回 (instance_type, description)。无匹配时返回 ("", "")。
+    中国区各服务可用的 Graviton 实例族不同（如 DocumentDB 仅 r6g），
+    通过 MANAGED_GRAVITON_FAMILY 查表确定。
     """
     prefix = MANAGED_SERVICE_PREFIX.get(service)
     if prefix is None:
@@ -1091,17 +1115,29 @@ def _resolve_managed_graviton_instance(service: str, vcpu: int = 0,
 
     suffix = ".search" if service == "AmazonES" else ""
 
+    # 查服务级别的 Graviton 实例族覆盖
+    svc_families = MANAGED_GRAVITON_FAMILY.get(service)
+
+    def _get_family(series: str) -> tuple[str, list]:
+        """获取指定系列(r/m)的实际可用 Graviton 族和规格表"""
+        if svc_families and series in svc_families:
+            return svc_families[series]
+        # 默认: r7g / m7g
+        if series == "r":
+            return "r7g", GRAVITON_R7G_SPECS
+        return "m7g", GRAVITON_M7G_SPECS
+
     def _build_type(family: str, size: str) -> str:
         if prefix:
             return f"{prefix}.{family}.{size}"
         return f"{family}.{size}{suffix}"
 
     if vcpu > 0 and memory > 0:
-        # Both specified: r7g if memory >= vcpu*4, else m7g
+        # Both specified: r series if memory >= vcpu*4, else m series
         if memory >= vcpu * 4:
-            family, specs = "r7g", GRAVITON_R7G_SPECS
+            family, specs = _get_family("r")
         else:
-            family, specs = "m7g", GRAVITON_M7G_SPECS
+            family, specs = _get_family("m")
         for sv, sm, sname in specs:
             if sv >= vcpu and sm >= memory:
                 inst = _build_type(family, sname)
@@ -1111,23 +1147,25 @@ def _resolve_managed_graviton_instance(service: str, vcpu: int = 0,
         inst = _build_type(family, sname)
         return inst, f"Graviton {family}.{sname} ({sv}vCPU/{sm}GiB, 最大可用)"
     elif memory > 0:
-        # Memory-only: prefer r7g (memory-optimized)
-        for sv, sm, sname in GRAVITON_R7G_SPECS:
+        # Memory-only: prefer r series (memory-optimized)
+        family, specs = _get_family("r")
+        for sv, sm, sname in specs:
             if sm >= memory:
-                inst = _build_type("r7g", sname)
-                return inst, f"Graviton r7g.{sname} ({sv}vCPU/{sm}GiB)"
-        sv, sm, sname = GRAVITON_R7G_SPECS[-1]
-        inst = _build_type("r7g", sname)
-        return inst, f"Graviton r7g.{sname} ({sv}vCPU/{sm}GiB, 最大可用)"
+                inst = _build_type(family, sname)
+                return inst, f"Graviton {family}.{sname} ({sv}vCPU/{sm}GiB)"
+        sv, sm, sname = specs[-1]
+        inst = _build_type(family, sname)
+        return inst, f"Graviton {family}.{sname} ({sv}vCPU/{sm}GiB, 最大可用)"
     elif vcpu > 0:
-        # vCPU-only: use m7g (general purpose)
-        for sv, sm, sname in GRAVITON_M7G_SPECS:
+        # vCPU-only: use m series (general purpose)
+        family, specs = _get_family("m")
+        for sv, sm, sname in specs:
             if sv >= vcpu:
-                inst = _build_type("m7g", sname)
-                return inst, f"Graviton m7g.{sname} ({sv}vCPU/{sm}GiB)"
-        sv, sm, sname = GRAVITON_M7G_SPECS[-1]
-        inst = _build_type("m7g", sname)
-        return inst, f"Graviton m7g.{sname} ({sv}vCPU/{sm}GiB, 最大可用)"
+                inst = _build_type(family, sname)
+                return inst, f"Graviton {family}.{sname} ({sv}vCPU/{sm}GiB)"
+        sv, sm, sname = specs[-1]
+        inst = _build_type(family, sname)
+        return inst, f"Graviton {family}.{sname} ({sv}vCPU/{sm}GiB, 最大可用)"
 
     return "", ""
 
@@ -1164,8 +1202,16 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
                 )
                 if inst:
                     item["instance_type"] = inst
+                    rec_desc = f"自动推荐: {desc}"
+                    # 提取推荐实例的实际内存，添加超配备注
+                    mem_match = re.search(r'/(\d+)GiB', desc)
+                    if mem_match and memory > 0:
+                        actual_mem = int(mem_match.group(1))
+                        if actual_mem > memory:
+                            rec_desc += (f"; AWS 最小匹配规格为 {inst}"
+                                         f"({actual_mem}GiB)，原始需求 {memory}GiB")
                     item["notes"] = notes.replace(
-                        m.group(0), f"自动推荐: {desc}"
+                        m.group(0), rec_desc
                     ).strip()
                 else:
                     item["notes"] = notes.replace(
@@ -1212,11 +1258,12 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
         best = rec_cache[key]
         if best:
             item["instance_type"] = best["instance_type"]
-            item["notes"] = notes.replace(
-                m.group(0),
-                f"自动推荐: {best['instance_type']} "
-                f"({best['vcpu']}vCPU/{best['memory']:.0f}GiB)"
-            ).strip()
+            rec_desc = (f"自动推荐: {best['instance_type']} "
+                        f"({best['vcpu']}vCPU/{best['memory']:.0f}GiB)")
+            if memory > 0 and best["memory"] > memory:
+                rec_desc += (f"; AWS 最小匹配规格为 {best['instance_type']}"
+                             f"({best['memory']:.0f}GiB)，原始需求 {memory}GiB")
+            item["notes"] = notes.replace(m.group(0), rec_desc).strip()
         else:
             item["notes"] = notes.replace(
                 m.group(0), f"需手动选择实例({vcpu}vCPU/{memory}GiB)"
