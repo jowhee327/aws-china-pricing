@@ -1025,6 +1025,7 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
 
         want_t = any(kw in context for kw in ["t2", "t3", "t4g", "突发", "burstable"])
         want_amd = any(kw in context for kw in ["amd", "c5a", "m5a", "r5a", "c6a", "m6a", "r6a"])
+        want_old = any(kw in context for kw in ["c5", "m5", "r5", "c4", "m4", "r4"])
         exclude_families = []
         if not want_t:
             exclude_families += ["t2", "t3", "t3a", "t4g"]
@@ -1032,6 +1033,13 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
             exclude_families += ["c5a", "c5ad", "m5a", "m5ad", "r5a", "r5ad",
                                 "c6a", "m6a", "r6a", "c7a", "m7a", "r7a",
                                 "hpc7a"]
+        if not want_old:
+            # 排除旧代 Intel（默认用最新代）
+            exclude_families += ["c4", "c5", "c5d", "c5n",
+                                "m4", "m5", "m5d", "m5n", "m5dn",
+                                "r4", "r5", "r5d", "r5n", "r5dn",
+                                "i3", "i3en", "d2", "h1",
+                                "p3", "g3", "g3s", "x1", "x1e", "z1d"]
 
         want_arm = any(kw in context for kw in ["arm", "graviton"])
         arch = "arm" if want_arm else "x86"
