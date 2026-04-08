@@ -205,14 +205,14 @@ EBS_VOLUME_HINTS: list[tuple[list[str], str]] = [
 
 # S3 存储类别提示词
 S3_STORAGE_CLASS_HINTS: list[tuple[list[str], str]] = [
-    (["intelligent-tiering", "智能分层", "smart tiering"], "Intelligent-Tiering"),
+    (["intelligent-tiering", "智能分层", "smart tiering"], "Intelligent-Tiering Frequent Access"),
     (["standard-ia", "低频访问", "infrequent access", "ia存储"], "Standard - Infrequent Access"),
     (["one zone-ia", "单区低频", "one zone ia"], "One Zone - Infrequent Access"),
     (["glacier instant", "即时检索"], "Glacier Instant Retrieval"),
-    (["glacier flexible", "灵活检索"], "Glacier Flexible Retrieval"),
+    (["glacier flexible", "灵活检索"], "Amazon Glacier"),
     (["glacier deep", "深度归档", "deep archive"], "Glacier Deep Archive"),
-    (["glacier", "归档"], "Glacier Flexible Retrieval"),
-    (["standard", "标准存储"], "General Purpose"),
+    (["glacier", "归档"], "Amazon Glacier"),
+    (["standard", "标准存储"], "Standard"),
 ]
 
 
@@ -227,13 +227,13 @@ def detect_ebs_volume_type(text: str) -> str:
 
 
 def detect_s3_storage_class(text: str) -> str:
-    """从文本中检测 S3 存储类别，默认 General Purpose"""
+    """从文本中检测 S3 存储类别，默认 Standard"""
     text_lower = text.lower()
     for keywords, storage_class in S3_STORAGE_CLASS_HINTS:
         for kw in keywords:
             if kw in text_lower:
                 return storage_class
-    return "General Purpose"  # 默认 Standard
+    return "Standard"  # 默认 S3 Standard
 
 
 def is_storage_service(service_code: str) -> bool:
@@ -960,7 +960,7 @@ def build_item(row_values: list, column_roles: dict[int, str],
         result["os"] = ""
 
         # 在 notes 中标注存储类别（仅非默认时）
-        if detected_storage_class != "General Purpose":
+        if detected_storage_class != "Standard":
             storage_note = f"存储类别: {detected_storage_class}"
             if result["notes"]:
                 result["notes"] = storage_note + "; " + result["notes"]
