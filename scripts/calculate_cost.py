@@ -38,12 +38,12 @@ def load_discount_config(config_path: str) -> dict:
             config = yaml.safe_load(f)
         return config or {}
     except FileNotFoundError:
-        print(f"[WARN] 折扣配置文件不存在: {config_path}", file=sys.stderr)
+        print(f"折扣配置文件不存在: {config_path}", file=sys.stderr)
         print("[INFO] 将使用 list price（无折扣）。", file=sys.stderr)
         print(f"[INFO] 请编辑 {config_path} 配置 EDP/PPA 折扣。", file=sys.stderr)
         return {}
     except yaml.YAMLError as e:
-        print(f"[WARN] 折扣配置文件格式错误: {e}", file=sys.stderr)
+        print(f"折扣配置文件格式错误: {e}", file=sys.stderr)
         return {}
 
 

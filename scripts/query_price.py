@@ -85,14 +85,14 @@ def run_aws_cli(args: list[str], timeout: int = 30, profile: str = None) -> Opti
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
-            print(f"[WARN] AWS CLI 错误: {result.stderr.strip()}", file=sys.stderr)
+            print(f"AWS CLI 错误: {result.stderr.strip()}", file=sys.stderr)
             return None
         return json.loads(result.stdout)
     except subprocess.TimeoutExpired:
-        print(f"[WARN] AWS CLI 超时 ({timeout}s)", file=sys.stderr)
+        print(f"AWS CLI 超时 ({timeout}s)", file=sys.stderr)
         return None
     except (json.JSONDecodeError, FileNotFoundError) as e:
-        print(f"[WARN] AWS CLI 执行失败: {e}", file=sys.stderr)
+        print(f"AWS CLI 执行失败: {e}", file=sys.stderr)
         return None
 
 
@@ -169,7 +169,7 @@ def query_cache(service: str, region: str, user_filters: dict) -> Optional[list[
                 # 在索引中过滤匹配项
                 return _filter_products(indexed, user_filters)
             except (json.JSONDecodeError, IOError) as e:
-                print(f"[WARN] 读取索引文件失败: {e}", file=sys.stderr)
+                print(f"读取索引文件失败: {e}", file=sys.stderr)
 
     # 尝试完整缓存文件
     cache_file = CACHE_DIR / f"{service}_{region}.json"
@@ -178,7 +178,7 @@ def query_cache(service: str, region: str, user_filters: dict) -> Optional[list[
             # 流式读取大文件，只提取匹配项
             return _search_cache_file(cache_file, user_filters)
         except (json.JSONDecodeError, IOError) as e:
-            print(f"[WARN] 读取缓存文件失败: {e}", file=sys.stderr)
+            print(f"读取缓存文件失败: {e}", file=sys.stderr)
 
     return None
 
@@ -255,7 +255,7 @@ def query_savings_plans(region: str, instance_type: str = "", operation: str = "
     """
     cache_file = CACHE_DIR / f"ComputeSavingsPlans_{region}.json"
     if not cache_file.exists():
-        print(f"[WARN] SP 缓存文件不存在: {cache_file}", file=sys.stderr)
+        print(f"SP 缓存文件不存在: {cache_file}", file=sys.stderr)
         print(f"  运行: python3 {SCRIPT_DIR}/update_prices.py --region {region} --services ComputeSavingsPlans", file=sys.stderr)
         return []
 
@@ -632,7 +632,7 @@ def main():
             key, value = f.split("=", 1)
             user_filters[key] = value
         else:
-            print(f"[WARN] 忽略无效过滤器: {f}", file=sys.stderr)
+            print(f"忽略无效过滤器: {f}", file=sys.stderr)
 
     # 区域映射：某些服务只在特定区域有价格
     query_region = args.region

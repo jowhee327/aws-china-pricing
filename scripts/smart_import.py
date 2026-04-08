@@ -639,7 +639,7 @@ def process_sheet(ws, sheet_name: str, region: str) -> list[dict]:
                 if item:
                     items.append(item)
             else:
-                print(f"[WARN] Sheet '{sheet_name}' 第 {i+1} 行: "
+                print(f"Sheet '{sheet_name}' 第 {i+1} 行: "
                       f"数据行出现在表头之前，已跳过", file=sys.stderr)
             i += 1
             continue
@@ -748,7 +748,7 @@ def build_item(row_values: list, column_roles: dict[int, str],
     # ── 构建备注（仅系统生成信息，不重复原始需求）──
     notes_parts: list[str] = []
     if warning:
-        notes_parts.append(f"[WARN] {warning}")
+        notes_parts.append(f"{warning}")
     if qty_note and qty_note != "按量付费":
         notes_parts.append(qty_note)
     if qty_note == "按量付费":
@@ -958,7 +958,7 @@ def process_csv_row(row: dict, region: str) -> dict | None:
             (f" {result['notes']}" if result["notes"] else "")
 
     if warning:
-        result["notes"] = (f"[WARN] {warning} " + result["notes"]).strip()
+        result["notes"] = (f"{warning} " + result["notes"]).strip()
 
     return result
 
@@ -988,7 +988,7 @@ def load_input(input_path: str, region: str) -> list[dict]:
             if result:
                 items.append(result)
             else:
-                print(f"[WARN] 第 {i} 行为空，已跳过", file=sys.stderr)
+                print(f"第 {i} 行为空，已跳过", file=sys.stderr)
         return items
 
 
@@ -1317,7 +1317,7 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
 def save_csv(items: list[dict], output_path: str):
     """保存标准化 CSV"""
     if not items:
-        print("[WARN] 没有数据可输出", file=sys.stderr)
+        print("没有数据可输出", file=sys.stderr)
         return
 
     fieldnames = list(OUTPUT_FIELDS)
