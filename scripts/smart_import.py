@@ -1019,11 +1019,14 @@ def _find_cheapest_instance(instances: list[dict],
                             vcpu_need: int, memory_need: float,
                             exclude_families: list[str] | None = None,
                             arch: str = "x86") -> dict | None:
-    """找到满足 vCPU >= 需求 AND memory >= 需求的价格最低实例
+    """找到满足 vCPU >= 需求 AND memory >= 需求的最优实例。
 
-    Args:
-        exclude_families: 排除的实例族前缀列表，如 ["t2", "t3", "t3a", "t4g"]
-        arch: 架构过滤 - "x86"(排除Graviton), "arm"(仅Graviton), "all"(不过滤)
+    根据 CPU:内存比例智能选择实例族：
+    - 1:1~1:2 → 计算优化 (c 系列)
+    - 1:2~1:4 → 通用 (m 系列)
+    - 1:4+    → 内存优化 (r 系列)
+
+    在匹配的系列内按价格最低选择。如果目标系列没有匹配，回落到所有系列中价格最低的。
     """
     candidates = [i for i in instances
                   if i["vcpu"] >= vcpu_need and i["memory"] >= memory_need]
@@ -1042,6 +1045,27 @@ def _find_cheapest_instance(instances: list[dict],
 
     if not candidates:
         return None
+
+    # 根据 CPU:内存比例确定目标实例族
+    if vcpu_need > 0 and memory_need > 0:
+        ratio = memory_need / vcpu_need
+        if ratio <= 2:
+            preferred_prefix = "c"  # 计算优化
+        elif ratio <= 4:
+            preferred_prefix = "m"  # 通用
+        else:
+            preferred_prefix = "r"  # 内存优化
+    else:
+        preferred_prefix = "m"  # 默认通用
+
+    # 在目标系列内找最便宜的
+    preferred = [i for i in candidates
+                 if i["instance_type"].split(".")[0].startswith(preferred_prefix)]
+
+    if preferred:
+        return min(preferred, key=lambda i: i["hourly_price"])
+
+    # 目标系列没有匹配，回落到所有候选中最便宜的
     return min(candidates, key=lambda i: i["hourly_price"])
 
 
