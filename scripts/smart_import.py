@@ -298,7 +298,9 @@ def normalize_billing_mode(mode: str) -> str:
         # 默认为 compute SP
         mode = mode.replace("sp-", "sp-compute-")
     # 标准化年份表示：1y -> 1yr, 3y -> 3yr
-    return mode.replace("1y-", "1yr-").replace("3y-", "3yr-")
+    mode = mode.replace("1y-", "1yr-").replace("3y-", "3yr-")
+    # 移除 -upfront 后缀，与 calculate_cost.py 和 BILLING_MODE_NAMES 保持一致
+    return mode.replace("-upfront", "")
 
 
 # 中国区各托管服务实际可用的 Graviton 实例族

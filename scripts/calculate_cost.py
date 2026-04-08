@@ -312,7 +312,7 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
     if is_ebs_storage:
         # EBS: 价格单位是 per GB-month，不是 per hour
         storage_gb = float(item.get("storage_gb", 0) or 0)
-        monthly_per_unit = hourly_after_discount * max(storage_gb, 1)
+        monthly_per_unit = hourly_after_discount * storage_gb
     else:
         monthly_per_unit = hourly_after_discount * usage_hours
     monthly_total = monthly_per_unit * quantity
