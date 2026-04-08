@@ -179,6 +179,19 @@ ENGINE_HINTS = {
     "valkey": ("cacheEngine", "Valkey"),
 }
 
+# 非AWS标准服务替代建议
+NON_STANDARD_SERVICE_SUGGESTIONS: dict[str, str] = {
+    "云堡垒机": "建议使用 AWS Systems Manager Session Manager",
+    "堡垒机": "建议使用 AWS Systems Manager Session Manager",
+}
+
+# 需要实例规格的服务（缺少规格时应提醒用户）
+SERVICES_NEED_SPEC = {
+    "AmazonEC2", "AmazonRDS", "AmazonElastiCache", "AmazonDocDB",
+    "AmazonNeptune", "AmazonRedshift", "AmazonMemoryDB", "AmazonMQ",
+    "AmazonES", "ElasticMapReduce",
+}
+
 
 # ── 列角色检测关键词 ──────────────────────────────────────────────────────
 COLUMN_ROLE_KEYWORDS = {
@@ -591,8 +604,17 @@ def build_item(row_values: list, column_roles: dict[int, str],
             service_code = "AmazonEC2"
             warning = f"应用服务 '{service_text}' 映射为EC2实例"
         else:
-            service_code = service_text.split()[0] if service_text.strip() else "UNKNOWN"
-            warning = f"非AWS标准服务: '{service_text}'"
+            service_code = service_text.strip() if service_text.strip() else "UNKNOWN"
+            # 检查是否有已知替代建议
+            suggestion = None
+            for key, sug in NON_STANDARD_SERVICE_SUGGESTIONS.items():
+                if key in service_text:
+                    suggestion = sug
+                    break
+            if suggestion:
+                warning = f"⚠️ 非AWS标准服务，无法自动查价。{suggestion}"
+            else:
+                warning = f"⚠️ 非AWS标准服务，请手动补充对应AWS服务"
 
     # ── 数量解析 ──
     qty, qty_note = parse_quantity(quantity_text)
@@ -680,6 +702,16 @@ def build_item(row_values: list, column_roles: dict[int, str],
         recommend_tag = f"recommend:{vcpu}c{mem}g"
         result["notes"] = (recommend_tag + " " + result["notes"]).strip() \
             if result["notes"] else recommend_tag
+
+    # 需要实例规格的服务但未检测到任何规格 → 提醒用户
+    if (service_code in SERVICES_NEED_SPEC
+            and not spec_info.get("vcpu")
+            and not spec_info.get("memory")
+            and not spec_info.get("storage_gb")
+            and not result["instance_type"]):
+        no_spec_warn = "⚠️ 未指定具体规格，已使用默认最低配置查价，请确认是否符合需求"
+        result["notes"] = (result["notes"] + "; " + no_spec_warn).strip("; ") \
+            if result["notes"] else no_spec_warn
 
     return result
 
@@ -922,18 +954,47 @@ def _query_all_ec2_instances(region: str) -> list[dict]:
     return instances
 
 
+def _is_graviton(instance_type: str) -> bool:
+    """判断实例类型是否为 Graviton (ARM) 架构"""
+    family = instance_type.split(".")[0] if "." in instance_type else instance_type
+    return bool(re.match(r'^[a-z]+\d+g', family))
+
+
 def _find_cheapest_instance(instances: list[dict],
-                            vcpu_need: int, memory_need: float) -> dict | None:
-    """找到满足 vCPU >= 需求 AND memory >= 需求的价格最低实例"""
+                            vcpu_need: int, memory_need: float,
+                            exclude_families: list[str] | None = None,
+                            arch: str = "x86") -> dict | None:
+    """找到满足 vCPU >= 需求 AND memory >= 需求的价格最低实例
+
+    Args:
+        exclude_families: 排除的实例族前缀列表，如 ["t2", "t3", "t3a", "t4g"]
+        arch: 架构过滤 - "x86"(排除Graviton), "arm"(仅Graviton), "all"(不过滤)
+    """
     candidates = [i for i in instances
                   if i["vcpu"] >= vcpu_need and i["memory"] >= memory_need]
+
+    if exclude_families:
+        candidates = [i for i in candidates
+                      if not any(i["instance_type"].startswith(f + ".")
+                                 for f in exclude_families)]
+
+    if arch == "x86":
+        candidates = [i for i in candidates
+                      if not _is_graviton(i["instance_type"])]
+    elif arch == "arm":
+        candidates = [i for i in candidates
+                      if _is_graviton(i["instance_type"])]
+
     if not candidates:
         return None
     return min(candidates, key=lambda i: i["hourly_price"])
 
 
 def resolve_instance_recommendations(items: list[dict], region: str) -> list[dict]:
-    """对含有 recommend:XcYg 的 EC2 条目，自动推荐价格最低的匹配实例"""
+    """对含有 recommend:XcYg 的 EC2 条目，自动推荐价格最低的匹配实例
+
+    默认排除 t 系列（突发性能）和 Graviton (ARM) 实例，除非用户明确要求。
+    """
     # 仅在有 EC2 推荐需求时查询 API（一次查询覆盖所有规格）
     need_ec2 = any(
         re.search(r'recommend:(\d+)c(\d+)g', item.get("notes", ""))
@@ -941,7 +1002,7 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
         for item in items
     )
     instances = _query_all_ec2_instances(region) if need_ec2 else []
-    rec_cache: dict[tuple[int, int], dict | None] = {}
+    rec_cache: dict[tuple, dict | None] = {}
 
     for item in items:
         notes = item.get("notes", "")
@@ -959,10 +1020,22 @@ def resolve_instance_recommendations(items: list[dict], region: str) -> list[dic
             ).strip()
             continue
 
-        # 按 (vcpu, memory) 缓存推荐结果
-        key = (vcpu, memory)
+        # 检测用户是否要求 t 系列或 ARM/Graviton
+        context = (notes + " " + item.get("original_request", "")).lower()
+
+        want_t = any(kw in context for kw in ["t2", "t3", "t4g", "突发", "burstable"])
+        exclude_families = [] if want_t else ["t2", "t3", "t3a", "t4g"]
+
+        want_arm = any(kw in context for kw in ["arm", "graviton"])
+        arch = "arm" if want_arm else "x86"
+
+        # 按 (vcpu, memory, exclude_families, arch) 缓存推荐结果
+        key = (vcpu, memory, tuple(exclude_families), arch)
         if key not in rec_cache:
-            rec_cache[key] = _find_cheapest_instance(instances, vcpu, memory)
+            rec_cache[key] = _find_cheapest_instance(
+                instances, vcpu, memory,
+                exclude_families=exclude_families, arch=arch
+            )
 
         best = rec_cache[key]
         if best:

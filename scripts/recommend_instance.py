@@ -11,6 +11,7 @@
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -28,9 +29,23 @@ WORKLOAD_INSTANCE_FAMILIES = {
 }
 
 
+def _is_graviton(instance_type: str) -> bool:
+    """判断实例类型是否为 Graviton (ARM) 架构。
+    Graviton 实例族在代号后带 'g'：m6g, c7g, r6gd, t4g 等。"""
+    family = instance_type.split(".")[0] if "." in instance_type else instance_type
+    return bool(re.match(r'^[a-z]+\d+g', family))
+
+
 def query_matching_instances(region: str, vcpu_min: int, memory_min: float,
-                             workload: str, max_results: int = 50) -> list[dict]:
-    """查询匹配条件的实例"""
+                             workload: str, max_results: int = 50,
+                             exclude_families: list[str] | None = None,
+                             arch: str = "all") -> list[dict]:
+    """查询匹配条件的实例
+
+    Args:
+        exclude_families: 排除的实例族前缀列表，如 ["t2", "t3", "t3a", "t4g"]
+        arch: 架构过滤 - "x86"(排除Graviton), "arm"(仅Graviton), "all"(不过滤)
+    """
     results = []
 
     instance_family = WORKLOAD_INSTANCE_FAMILIES.get(workload, "General purpose")
@@ -60,6 +75,17 @@ def query_matching_instances(region: str, vcpu_min: int, memory_min: float,
 
         instance_type = attrs.get("instanceType", "")
         if not instance_type:
+            continue
+
+        # 排除指定实例族
+        if exclude_families:
+            if any(instance_type.startswith(f + ".") for f in exclude_families):
+                continue
+
+        # 架构过滤
+        if arch == "x86" and _is_graviton(instance_type):
+            continue
+        if arch == "arm" and not _is_graviton(instance_type):
             continue
 
         # 解析 vCPU 和内存
@@ -163,6 +189,11 @@ def main():
     parser.add_argument("--top", "-n", type=int, default=10, help="显示前 N 个推荐 (默认: 10)")
     parser.add_argument("--profile", default=None,
                        help="AWS CLI profile (默认: 环境变量 AWS_PROFILE 或 default)")
+    parser.add_argument("--exclude-families", default="",
+                       help="排除的实例族前缀，逗号分隔 (如: t2,t3,t3a,t4g)")
+    parser.add_argument("--arch", default="all",
+                       choices=["x86", "arm", "all"],
+                       help="架构过滤: x86(排除Graviton), arm(仅Graviton), all(不过滤)")
     parser.add_argument("--json", action="store_true", help="JSON 格式输出")
     args = parser.parse_args()
     # 设置 profile
@@ -170,11 +201,14 @@ def main():
         import query_price
         query_price.AWS_PROFILE = args.profile
 
+    exclude_families = [f.strip() for f in args.exclude_families.split(",") if f.strip()]
+
     family_name = WORKLOAD_INSTANCE_FAMILIES.get(args.workload, "General purpose")
     print(f"正在查询 {args.workload} 类型实例（{family_name}）@ {args.region} ...",
           file=sys.stderr)
 
-    results = query_matching_instances(args.region, args.vcpu, args.memory, args.workload)
+    results = query_matching_instances(args.region, args.vcpu, args.memory, args.workload,
+                                       exclude_families=exclude_families, arch=args.arch)
 
     # 按性价比排序
     results.sort(key=lambda r: r["cost_efficiency"], reverse=True)
