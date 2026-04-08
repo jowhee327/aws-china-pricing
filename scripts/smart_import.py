@@ -1394,6 +1394,11 @@ def main():
                         help="客户名称（报价单用）")
     args = parser.parse_args()
 
+    # 自动推断 AWS profile：中国区 region 时，默认用 region 名作为 profile
+    # 避免用户忘传 --profile 导致 AWS CLI 用全球区默认 profile 访问中国区 API 失败
+    if not args.profile and args.region.startswith("cn-"):
+        args.profile = args.region
+
     # 默认输出 Excel 报价单
     if not args.output and not args.calculate:
         input_path = Path(args.input)

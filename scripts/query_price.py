@@ -605,6 +605,10 @@ def main():
     parser.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     args = parser.parse_args()
 
+    # 自动推断 AWS profile：中国区 region 时，默认用 region 名作为 profile
+    if not args.profile and args.region.startswith("cn-"):
+        args.profile = args.region
+
     # 设置 profile
     global AWS_PROFILE
     if args.profile:
