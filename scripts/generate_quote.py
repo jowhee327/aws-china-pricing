@@ -202,6 +202,10 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
         if r.get("warning"):
             notes = f"{notes} ⚠{r['warning']}" if notes else f"⚠{r['warning']}"
 
+        hourly = r.get("hourly_after_discount", 0)
+        if include_tax:
+            hourly = round(hourly * 1.06, 6)  # 6% 增值税
+
         values = [
             idx,
             r.get("service", ""),
@@ -210,7 +214,7 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
             r.get("quantity", 1),
             r.get("usage_hours", 720),
             billing_name,
-            r.get("hourly_after_discount", 0),
+            hourly,
             None,  # 月费/台 = 公式
             None,  # 月费合计 = 公式
             None,  # 年费合计 = 公式
@@ -271,12 +275,6 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
 def generate_quote(items: list[dict], results: list[dict], config: dict):
     """生成报价单（支持多 Sheet）"""
     wb = Workbook()
-
-    # 将 sheet_name/section 从 items 复制到 results
-    for i, item in enumerate(items):
-        if i < len(results):
-            results[i]["sheet_name"] = item.get("sheet_name", "")
-            results[i]["section"] = item.get("section", "")
 
     # 按 sheet_name 分组（保留原始顺序）
     groups: OrderedDict[str, list[dict]] = OrderedDict()
@@ -376,6 +374,8 @@ def main():
                 "notes": item.get("notes", ""),
                 "original_request": item.get("original_request", ""),
                 "currency": "CNY",
+                "sheet_name": item.get("sheet_name", ""),
+                "section": item.get("section", ""),
             })
             continue
         cost = calculate_item_cost(item, price_data, discount_config, args.include_tax)

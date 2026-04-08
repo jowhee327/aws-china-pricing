@@ -435,6 +435,9 @@ def calculate_data_transfer_cost(item: dict, discount_config: dict, include_tax:
         "transfer_type": transfer_type,
         "transfer_gb": gb,
         "transfer_cost_before_discount": cost,
+        "sheet_name": item.get("sheet_name", ""),
+        "section": item.get("section", ""),
+        "original_request": item.get("original_request", ""),
     }
 
 
@@ -529,7 +532,7 @@ def main():
         print(compare_modes(items, modes, discount_config, args.include_tax))
         return
 
-    # 逐条计算（all_results 保持与 items 顺序对齐，用于 generate_quote 索引匹配）
+    # 逐条计算
     results = []
     data_transfer_results = []
     all_results = []

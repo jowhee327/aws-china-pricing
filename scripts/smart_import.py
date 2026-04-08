@@ -1342,6 +1342,8 @@ def _output_excel(items: list[dict], args):
                 "notes": item.get("notes", ""),
                 "original_request": item.get("original_request", ""),
                 "currency": "CNY",
+                "sheet_name": item.get("sheet_name", ""),
+                "section": item.get("section", ""),
             })
             continue
         cost = calculate_item_cost(item, price_data, discount_config, args.include_tax)

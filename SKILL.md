@@ -86,9 +86,9 @@ python3 scripts/recommend_instance.py --vcpu 8 --memory 32 --workload gpu --regi
 - `storage` — 存储密集型 (i3, d2, d3 等)
 - `gpu` — GPU 实例 (p3, g4dn, g5 等)
 
-### 4. 一键生成 Excel 报价单（推荐）
+### 4. 一键生成 Excel 报价单
 
-输入 Excel/CSV，直接输出 Excel 报价单（smart_import → calculate_cost → generate_quote 一步到位）：
+输入任意格式的 Excel/CSV，直接输出 Excel 报价单，一步到位：
 
 ```bash
 # 最简用法：输入 Excel，输出 {文件名}_报价单.xlsx
@@ -107,49 +107,9 @@ python3 scripts/smart_import.py --input workload.xlsx --output quote.xlsx --regi
   --profile cn-north-1
 ```
 
-### 5. 批量成本计算（高级用法）
+> **重要**：这是默认且唯一推荐的报价方式。不要分步调用 calculate_cost.py 或 generate_quote.py。
 
-通过 CSV 文件批量计算：
-
-```bash
-python3 scripts/calculate_cost.py --input workload.csv --region cn-north-1 \
-  --discount-config discount-config.yaml --output result.csv
-```
-
-对比多种计费方案：
-```bash
-python3 scripts/calculate_cost.py --input workload.csv --region cn-north-1 \
-  --compare on-demand,ri-standard-1yr-partial,sp-compute-1yr-partial
-```
-
-含税计算（6% 增值税）：
-```bash
-python3 scripts/calculate_cost.py --input workload.csv --region cn-north-1 --include-tax
-```
-
-**数据传输费**：在 CSV 中使用 `transfer_type` 和 `transfer_gb` 字段：
-```csv
-service,instance_type,region,quantity,usage_hours,os,engine,storage_gb,billing_mode,notes,transfer_type,transfer_gb
-AmazonEC2,c6i.xlarge,cn-north-1,10,730,Linux,,,on-demand,Web服务器,,
-DataTransfer,,cn-north-1,1,,,,,,,out_to_internet,500
-DataTransfer,,cn-north-1,1,,,,,,,cross_az,1000
-```
-
-支持的传输类型：
-- `out_to_internet` — 出公网流量（阶梯定价）
-- `cross_az` — 跨可用区传输
-- `same_region` — 同区域内传输（免费）
-- `cloudfront` — CloudFront 分发（阶梯定价）
-
-### 6. 单独生成 Excel 报价单（高级用法）
-
-```bash
-python3 scripts/generate_quote.py --input workload.csv --region cn-north-1 \
-  --customer "客户名称" --validity 30 --output quote.xlsx \
-  --discount-config discount-config.yaml --include-tax
-```
-
-### 7. 更新价格数据缓存
+### 5. 更新价格数据缓存
 
 ```bash
 # 更新所有服务（含 Savings Plans）
