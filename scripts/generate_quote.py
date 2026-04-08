@@ -160,9 +160,6 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
 
     # 明细数据
     data_start = header_row + 1
-    total_monthly = 0
-    total_yearly = 0
-    total_upfront = 0
     fmt = [None, None, None, None, "#,##0", "#,##0", None,
            None, CNY_FORMAT, CNY_FORMAT, CNY_FORMAT, CNY_FORMAT, None, None]
 
@@ -186,26 +183,48 @@ def generate_quote(items: list[dict], results: list[dict], config: dict):
             r.get("usage_hours", 720),
             billing_name,
             r.get("hourly_after_discount", 0),
-            r.get("monthly_per_unit", 0),
-            r.get("monthly_total", 0),
-            r.get("yearly_total", 0),
+            None,  # 月费/台 = 公式
+            None,  # 月费合计 = 公式
+            None,  # 年费合计 = 公式
             r.get("upfront_total", 0),
             notes,
             r.get("original_request", ""),
         ]
         write_data_row(ws, row_num, values, fmt)
 
-        total_monthly += r.get("monthly_total", 0)
-        total_yearly += r.get("yearly_total", 0)
-        total_upfront += r.get("upfront_total", 0)
+        # 用公式替代硬编码数字
+        # I列=月费/台: =H*F (小时单价 × 月使用时长)
+        cell_monthly_unit = ws.cell(row=row_num, column=9)
+        cell_monthly_unit.value = f"=H{row_num}*F{row_num}"
+        cell_monthly_unit.number_format = CNY_FORMAT
+        # J列=月费合计: =I*E (月费/台 × 数量)
+        cell_monthly_total = ws.cell(row=row_num, column=10)
+        cell_monthly_total.value = f"=I{row_num}*E{row_num}"
+        cell_monthly_total.number_format = CNY_FORMAT
+        # K列=年费合计: =J*12
+        cell_yearly = ws.cell(row=row_num, column=11)
+        cell_yearly.value = f"=J{row_num}*12"
+        cell_yearly.number_format = CNY_FORMAT
 
-    # 合计行
+    # 合计行用 SUM 公式
     total_row = data_start + len(results)
     total_values = [
         "", "合计", "", "", "", "", "",
-        "", "", total_monthly, total_yearly, total_upfront, "", "",
+        "", "", None, None, None, "", "",
     ]
     write_total_row(ws, total_row, total_values, fmt)
+    # J列=月费合计 SUM
+    ws.cell(row=total_row, column=10).value = f"=SUM(J{data_start}:J{total_row-1})"
+    ws.cell(row=total_row, column=10).number_format = CNY_FORMAT
+    ws.cell(row=total_row, column=10).font = TOTAL_FONT
+    # K列=年费合计 SUM
+    ws.cell(row=total_row, column=11).value = f"=SUM(K{data_start}:K{total_row-1})"
+    ws.cell(row=total_row, column=11).number_format = CNY_FORMAT
+    ws.cell(row=total_row, column=11).font = TOTAL_FONT
+    # L列=预付 SUM
+    ws.cell(row=total_row, column=12).value = f"=SUM(L{data_start}:L{total_row-1})"
+    ws.cell(row=total_row, column=12).number_format = CNY_FORMAT
+    ws.cell(row=total_row, column=12).font = TOTAL_FONT
 
     # 注脚
     foot_row = total_row + 2
