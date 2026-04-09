@@ -171,7 +171,7 @@ SERVICE_DISPLAY_NAMES = {
     "AmazonCloudFront": "CloudFront",
     "AWSELB": "ELB",
     "AmazonVPC": "VPC",
-    "AWSTransitGateway": "Transit Gateway",
+    "AWSTransitGateway": "Transit Gateway",  # 历史兼容，TGW 实际在 VPC 下
     "AWSDirectConnect": "Direct Connect",
     "AMAZONROUTE53REGIONALCHINA": "Route 53",
     "awswaf": "WAF",

@@ -91,9 +91,9 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     (["network firewall", "网络防火墙"], "AWSNetworkFirewall", {}),
     (["vpc", "vpn", "虚拟专用网络", "vpcendpoint",
       "vpc endpoint"], "AmazonVPC", {}),
-    (["nat", "nat网关", "nat gateway", "私网nat"], "AmazonVPC", {}),  # NAT 网关属于 VPC
+    (["nat", "nat网关", "nat gateway", "私网nat"], "AmazonEC2", {"productFamily": "NAT Gateway"}),  # NAT Gateway 在 EC2 下
     (["eip", "弹性公网ip", "公网ip", "elastic ip"], "AmazonVPC", {}),  # EIP 属于 VPC
-    (["tgw", "transit gateway", "中转网关"], "AWSTransitGateway", {}),  # TGW 单独服务
+    (["tgw", "transit gateway", "中转网关"], "AmazonVPC", {}),  # TGW 在 VPC 下
 
     # ── 消息/流式 ──
     (["sqs", "消息队列", "队列", "message queue"], "AWSQueueService", {}),
@@ -899,6 +899,12 @@ def build_item(row_values: list, column_roles: dict[int, str],
     unit_text = role_values.get("unit", "")
     description_text = role_values.get("description", "")
     business_text = role_values.get("business", "")
+
+    # 跳过合计/汇总行
+    _summary_keywords = {"total", "合计", "小计", "汇总", "subtotal", "sum"}
+    for check_text in [service_text, spec_text, quantity_text, description_text]:
+        if check_text and check_text.lower().strip() in _summary_keywords:
+            return None
 
     # 跳过完全空行
     all_text = " ".join(filter(None, [
