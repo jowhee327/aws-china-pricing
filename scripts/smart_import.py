@@ -517,22 +517,29 @@ def extract_spec(text: str) -> dict:
     if not text:
         return info
 
+    # 记录已匹配的区间，避免重复匹配
+    matched_ranges = []
+
     # 1. CPU+Memory: "8C16G", "4C/16G", "16C/32G", "8核16G", "12c32g500G"
     m = re.search(r'(\d+)\s*[cC核vV]\s*[pP]?[uU]?\s*/?\s*(\d+)\s*[gG]', text)
     if m:
         info["vcpu"] = int(m.group(1))
         info["memory"] = int(m.group(2))
+        matched_ranges.append((m.start(), m.end()))
+
         # 检查紧跟的存储: "12c32g500G"
         rest = text[m.end():]
         sm = re.match(r'(\d+)\s*[gG]', rest)
         if sm:
             info["storage_gb"] = int(sm.group(1))
+            matched_ranges.append((m.end(), m.end() + sm.end()))
 
     # 1.1. 独立 CPU: "4核", "8核", "16核" (没有 CPU 信息时)
     if "vcpu" not in info:
         m = re.search(r'(\d+)\s*核', text)
         if m:
             info["vcpu"] = int(m.group(1))
+            matched_ranges.append((m.start(), m.end()))
 
     # 2. 独立内存: "8G", "8GiB", "8G-Cluster", "4G内存"
     if "memory" not in info:
@@ -541,21 +548,35 @@ def extract_spec(text: str) -> dict:
             text, re.IGNORECASE
         ):
             start = mm.start()
+
+            # 检查是否与已匹配区间重叠
+            if any(start < end and mm.end() > begin for begin, end in matched_ranges):
+                continue
+
+            # 排除以"="开头的情况（Bug 2 修复）
             prefix = text[max(0, start - 3):start]
+            if '=' in prefix:
+                continue
+
             # 排除存储相关的关键词，以及存储服务上下文
             context = text[max(0, start-10):mm.end()+10].lower()
             exclude_keywords = ['存储', 'storage', '磁盘', 'disk', 'ssd', 'hdd', 'gp3', 'gp2', 'io1', 'io2']
             if not any(keyword in context for keyword in exclude_keywords):
                 info["memory"] = int(mm.group(1))
+                matched_ranges.append((mm.start(), mm.end()))
                 break
 
     # 3. 存储: "存储128G", "1TB", "10T", "500G存储", "100GB", "2TB", "=7500G"
     if "storage_gb" not in info:
         # TB 格式（包括不带B的格式）
-        m = re.search(r'(\d+)\s*[tT][bB]?(?![a-zA-Z])', text)
-        if m:
+        for m in re.finditer(r'(\d+)\s*[tT][bB]?(?![a-zA-Z])', text):
+            # 检查是否与已匹配区间重叠
+            if any(m.start() < end and m.end() > begin for begin, end in matched_ranges):
+                continue
             info["storage_gb"] = int(m.group(1)) * 1024
-        else:
+            break
+
+        if "storage_gb" not in info:
             # GB 格式：支持多种模式
             patterns = [
                 r'(?:存储|storage|磁盘|disk)\s*(\d+)\s*[gG][bB]?',  # "存储100G"
@@ -564,14 +585,18 @@ def extract_spec(text: str) -> dict:
                 r'(\d+)\s*[gG][bB]?(?![a-zA-Z])',  # "100GB" (确保GB后面没有其他字母)
             ]
             for pattern in patterns:
-                m = re.search(pattern, text, re.IGNORECASE)
-                if m:
+                for m in re.finditer(pattern, text, re.IGNORECASE):
+                    # 检查是否与已匹配区间重叠（Bug 1 修复）
+                    if any(m.start() < end and m.end() > begin for begin, end in matched_ranges):
+                        continue
+
                     # 确保不是内存相关的GB（通过检查前后文）
-                    full_match = m.group(0)
                     context = text[max(0, m.start()-10):m.end()+10].lower()
                     if not any(word in context for word in ['内存', 'memory', 'ram', 'vcpu', 'cpu']):
                         info["storage_gb"] = int(m.group(1))
                         break
+                if "storage_gb" in info:
+                    break
 
     # 4. 带宽/IO 标注
     notes = []
