@@ -2,12 +2,12 @@
 
 [🇨🇳 中文版](README.md)
 
-A tool for querying AWS China region pricing, calculating costs, and generating quotes. Covers all 95+ services across Beijing (cn-north-1), Ningxia (cn-northwest-1), and Auto Cloud Local Zone (cn-north-1-pkx-1).
+A Skill for querying AWS China region pricing, calculating costs, and generating quotes. Covers all 87 services across Beijing (cn-north-1), Ningxia (cn-northwest-1), and Auto Cloud Local Zone (cn-north-1-pkx-1).
 
 ## Features
 
 - **Smart Import** — Auto-mapping Excel/CSV with any format
-- **Real-time Price Query** — 95+ services
+- **Real-time Price Query** — 87 services
 - **RI/SP Support** — Standard/Convertible RI + Compute/Instance SP
 - **Discount Support** — EDP/PPA
 - **Excel Quote Generation**
@@ -70,7 +70,7 @@ Redis缓存,4G内存,3,Session缓存
 Kafka消息队列,,2,异步消息
 ```
 
-Supports 80+ mapping rules covering all 95 China region services in Chinese/English, with auto-detection of:
+Supports 80+ mapping rules covering all 87 China region services in Chinese/English, with auto-detection of:
 - Engine type: "MySQL" → `engine=MySQL`, "Redis" → `engine=Redis`
 - Instance specs: "8C16G" → `vCPU=8, memory=16` → recommends best-fit instance
 - Storage sizes: "1TB" → `storage_gb=1024`
@@ -139,6 +139,137 @@ python3 scripts/update_prices.py --region cn-north-1 --force
 ```
 
 > **Important**: Savings Plans data must be downloaded via `update_prices.py` before SP queries work (SP data is not available through the Query API).
+
+## 30 Billing Modes
+
+Supports the following 30 billing modes via the `--billing-mode` parameter:
+
+### Reserved Instances (12 modes)
+- `ri-standard-1yr-no` - Standard RI 1-year No Upfront
+- `ri-standard-1yr-partial` - Standard RI 1-year Partial Upfront  
+- `ri-standard-1yr-all` - Standard RI 1-year All Upfront
+- `ri-standard-3yr-no` - Standard RI 3-year No Upfront
+- `ri-standard-3yr-partial` - Standard RI 3-year Partial Upfront
+- `ri-standard-3yr-all` - Standard RI 3-year All Upfront
+- `ri-convertible-1yr-no` - Convertible RI 1-year No Upfront
+- `ri-convertible-1yr-partial` - Convertible RI 1-year Partial Upfront
+- `ri-convertible-1yr-all` - Convertible RI 1-year All Upfront
+- `ri-convertible-3yr-no` - Convertible RI 3-year No Upfront
+- `ri-convertible-3yr-partial` - Convertible RI 3-year Partial Upfront
+- `ri-convertible-3yr-all` - Convertible RI 3-year All Upfront
+
+### Savings Plans (4 modes)
+- `sp-compute-1yr` - Compute Savings Plans 1-year
+- `sp-compute-3yr` - Compute Savings Plans 3-year
+- `sp-instance-1yr` - EC2 Instance Savings Plans 1-year
+- `sp-instance-3yr` - EC2 Instance Savings Plans 3-year
+
+### Other Modes (12 modes)
+- `on-demand` - On-Demand pricing (default)
+- `spot` - Spot instances
+- `dedicated-host` - Dedicated hosts
+- `dedicated-instance` - Dedicated instances
+- `mixed-ri-od` - Mixed mode: RI + On-Demand
+- `mixed-sp-od` - Mixed mode: SP + On-Demand
+- `mixed-ri-spot` - Mixed mode: RI + Spot
+- `mixed-sp-spot` - Mixed mode: SP + Spot
+- `prepaid` - Prepaid
+- `postpaid` - Postpaid
+- `pay-per-use` - Pay-per-use
+- `serverless` - Serverless pricing
+
+> **Smart Adaptation**: Only services that support RI/SP (like EC2, RDS) will use the specified RI/SP mode. Unsupported services automatically fall back to on-demand pricing.
+
+## Storage Service Features
+
+### S3 Storage Class Detection
+
+Supports pricing queries for 7 S3 storage classes:
+
+| Storage Class | `storageClass` Value | Use Case |
+|---------------|---------------------|----------|
+| Standard | Standard | Frequently accessed data |
+| Intelligent Tiering | IntelligentTiering | Automatic cost optimization |
+| Standard-IA | StandardInfrequentAccess | Infrequently accessed |
+| One Zone-IA | OneZoneInfrequentAccess | Single-AZ infrequent access |
+| Glacier Instant Retrieval | GlacierInstantRetrieval | Millisecond retrieval archive |
+| Glacier Flexible Retrieval | GlacierFlexibleRetrieval | Minutes to hours retrieval |
+| Glacier Deep Archive | GlacierDeepArchive | 12-hour retrieval long-term archive |
+
+### EBS as Independent Service
+
+EBS as an independent service (ServiceCode: AmazonEBS) with volume type detection:
+
+| Volume Type | `volumeType` Value | Features |
+|-------------|-------------------|----------|
+| General Purpose SSD | gp3 | Default type, best price-performance |
+| General Purpose SSD | gp2 | Legacy general purpose |
+| Provisioned IOPS SSD | io2 | High-performance databases |
+| Provisioned IOPS SSD | io1 | Legacy high-performance |
+| Throughput Optimized HDD | st1 | Big data analytics |
+| Cold HDD | sc1 | Infrequent access data |
+
+### Unified Storage Billing
+
+All storage services use unified **GB/month** billing:
+- **S3**: Per storage class by actual usage
+- **EFS**: By file system size  
+- **FSx**: By file system capacity
+- **EBS**: By volume size
+- **Glacier**: By archived data volume
+
+## Pay-per-Use Services
+
+The following services are marked as "pay-per-use" and don't use hourly billing:
+
+- **Lambda**: By request count and execution time
+- **API Gateway**: By API call count
+- **SQS**: By message count
+- **SNS**: By notification count
+- **DynamoDB**: By read/write capacity units
+- **CloudWatch**: By metrics and log volume
+- **S3**: By storage volume and requests
+- **CloudFront**: By data transfer volume
+
+These services show default usage estimates in quotes to avoid misleading $0 prices.
+
+## 87 AWS China Services
+
+Supports pricing queries for all 87 AWS China region services with unified display names:
+
+| Service Category | Main Services | Display Name |
+|------------------|---------------|--------------|
+| Compute | AmazonEC2 | EC2 |
+| | AWSLambda | Lambda |
+| | AmazonECS | ECS |
+| Database | AmazonRDS | RDS |
+| | AmazonDynamoDB | DynamoDB |
+| | AmazonElastiCache | ElastiCache |
+| Storage | AmazonS3 | S3 |
+| | AmazonEBS | EBS |
+| | AmazonEFS | EFS |
+| Network | AmazonVPC | VPC |
+| | AmazonCloudFront | CloudFront |
+| | ElasticLoadBalancing | ELB |
+
+See [references/service-catalog.md](references/service-catalog.md) for the complete service list.
+
+## Version History
+
+### v1.7.3 (Latest)
+- ✅ 30 billing modes support with smart applicability judgment
+- ✅ EBS independent service, gp3 default volume type
+- ✅ S3 seven storage classes smart detection
+- ✅ Unified per-GB-month billing for storage services
+- ✅ Pay-per-use service annotation and default usage
+- ✅ EDP discount display in quote header
+- ✅ 87 services unified display name standards
+- ✅ Automatic use of AWS CLI default profile
+
+### v1.5.4
+- ✅ Basic price query and RI/SP support
+- ✅ Smart import and Excel quote generation
+- ✅ EDP/PPA discount configuration
 
 ## CSV Input Format
 

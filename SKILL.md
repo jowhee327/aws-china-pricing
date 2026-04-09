@@ -1,6 +1,6 @@
 ---
 name: aws-china-pricing
-description: AWS 中国区定价查询、成本计算、报价生成、实例推荐工具，支持 95+ 服务、Savings Plans/RI/On-Demand 对比、数据传输费计算、EDP/PPA 折扣和 Excel 报价单输出。触发词：AWS 中国区价格、EC2 实例价格、成本估算、报价单、Savings Plans、预留实例、数据传输费、实例推荐、性价比
+description: AWS 中国区定价查询、成本计算、报价生成、实例推荐工具，支持 87 个服务、Savings Plans/RI/On-Demand 对比、数据传输费计算、EDP/PPA 折扣和 Excel 报价单输出。触发词：AWS 中国区价格、EC2 实例价格、成本估算、报价单、Savings Plans、预留实例、数据传输费、实例推荐、性价比
 ---
 
 # ⚠️ **CRITICAL - MANDATORY RULES FOR AI AGENTS** ⚠️
@@ -228,7 +228,7 @@ python3 scripts/update_prices.py --region cn-north-1 --services AmazonEC2,Amazon
 ## 覆盖范围
 
 - **区域**：cn-north-1（北京）、cn-northwest-1（宁夏）、cn-north-1-pkx-1（Auto Cloud Local Zone）
-- **服务**：通过 API 动态发现，目前约 95 个服务
+- **服务**：通过 API 动态发现，目前 87 个服务
 - **计费模式**：On-Demand、Reserved Instances（12种组合）、Savings Plans（Compute SP / Instance SP）、Serverless
 - **数据传输**：出公网、跨 AZ、同区域、CloudFront 分发
 

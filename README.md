@@ -2,12 +2,12 @@
 
 [🇺🇸 English](README_EN.md)
 
-一个工具，用于查询 AWS 中国区服务价格、计算成本和生成报价单。覆盖北京区 (cn-north-1)、宁夏区 (cn-northwest-1) 和 Auto Cloud Local Zone (cn-north-1-pkx-1) 的 87 个服务。
+一个 Skill，用于查询 AWS 中国区服务价格、计算成本和生成报价单。覆盖北京区 (cn-north-1)、宁夏区 (cn-northwest-1) 和 Auto Cloud Local Zone (cn-north-1-pkx-1) 的 87 个服务。
 
 ## 功能特性
 
 - **智能导入** — 任意格式 Excel/CSV 自动识别
-- **实时价格查询** — 95+ 服务
+- **实时价格查询** — 87 个服务
 - **RI/SP 支持** — Standard/Convertible RI + Compute/Instance SP
 - **折扣支持** — EDP/PPA
 - **Excel 报价单生成**
