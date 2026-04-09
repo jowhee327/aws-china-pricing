@@ -56,7 +56,7 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
      "AmazonRDS", {"engine": "Aurora PostgreSQL"}),
     (["aurora"], "AmazonRDS", {"engine": "Aurora MySQL"}),
     (["mysql", "mysql数据库"], "AmazonRDS", {"engine": "MySQL"}),
-    (["postgresql", "postgres", "pg数据库"], "AmazonRDS", {"engine": "PostgreSQL"}),
+    (["postgresql", "postgres", "pg数据库", "psql", "pgsql"], "AmazonRDS", {"engine": "PostgreSQL"}),
     (["mariadb"], "AmazonRDS", {"engine": "MariaDB"}),
     (["oracle", "oracle数据库"], "AmazonRDS", {"engine": "Oracle"}),
     (["sql server", "sqlserver", "mssql"], "AmazonRDS", {"engine": "SQL Server"}),
@@ -91,6 +91,9 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     (["network firewall", "网络防火墙"], "AWSNetworkFirewall", {}),
     (["vpc", "vpn", "虚拟专用网络", "vpcendpoint",
       "vpc endpoint"], "AmazonVPC", {}),
+    (["nat", "nat网关", "nat gateway", "私网nat"], "AmazonVPC", {}),  # NAT 网关属于 VPC
+    (["eip", "弹性公网ip", "公网ip", "elastic ip"], "AmazonVPC", {}),  # EIP 属于 VPC
+    (["tgw", "transit gateway", "中转网关"], "AWSTransitGateway", {}),  # TGW 单独服务
 
     # ── 消息/流式 ──
     (["sqs", "消息队列", "队列", "message queue"], "AWSQueueService", {}),
@@ -110,6 +113,10 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     (["athena", "sql查询", "交互式查询"], "AmazonAthena", {}),
     (["glue", "etl", "数据集成"], "AWSGlue", {}),
     (["quicksight", "bi", "报表", "可视化"], "AmazonQuickSight", {}),
+    (["flink", "实时计算"], "AmazonKinesisAnalytics", {}),  # Flink → Kinesis Data Analytics (Managed Flink)
+    (["starrocks", "doris"], "AmazonEC2", {}),  # 自建OLAP，跑在EC2上
+    (["cdh", "cloudera", "hadoop集群"], "AmazonEC2", {}),  # 自建大数据集群
+    (["clickhouse", "clickhouse数据库"], "AmazonEC2", {}),  # 自建列式数据库
 
     # ── AI/ML ──
     (["sagemaker", "机器学习", "ml", "ai"], "AmazonSageMaker", {}),
@@ -130,9 +137,10 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     # ── 运维/管理 ──
     (["cloudwatch", "监控", "告警", "日志服务", "云监控"], "AmazonCloudWatch", {}),
     (["cloudtrail", "日志审计"], "AWSCloudTrail", {}),
-    (["backup", "备份"], "AWSBackup", {}),
+    (["backup", "备份", "云备份"], "AWSBackup", {}),
     (["workspaces", "桌面", "云桌面", "vdi"], "AmazonWorkSpaces", {}),
     (["dms", "数据迁移", "数据库迁移"], "AWSDatabaseMigrationSvc", {}),
+    (["drs", "数据复制"], "AWSDatabaseMigrationSvc", {}),  # DRS → DMS
     (["datasync", "数据同步"], "AWSDataSync", {}),
     (["snowball", "数据搬迁"], "IngestionServiceSnowball", {}),
     (["iot analytics"], "AWSIoTAnalytics", {}),
@@ -184,6 +192,9 @@ ENGINE_HINTS = {
     "mysql": ("engine", "MySQL"),
     "postgresql": ("engine", "PostgreSQL"),
     "postgres": ("engine", "PostgreSQL"),
+    "psql": ("engine", "PostgreSQL"),
+    "pgsql": ("engine", "PostgreSQL"),
+    "pg": ("engine", "PostgreSQL"),
     "mariadb": ("engine", "MariaDB"),
     "oracle": ("engine", "Oracle"),
     "sql server": ("engine", "SQL Server"),
@@ -389,14 +400,18 @@ MANAGED_GRAVITON_FAMILY: dict[str, dict[str, tuple[str, list]]] = {
 # ── 列角色检测关键词 ──────────────────────────────────────────────────────
 COLUMN_ROLE_KEYWORDS = {
     "service_type": ["类型", "云产品", "产品分类", "服务类型", "资源类型",
-                     "type", "service", "云产品分类"],
-    "spec": ["配置", "规格", "详情", "spec", "configuration", "config", "名称"],
+                     "type", "service", "云产品分类", "产品名称", "组件",
+                     "服务", "产品", "资源", "component", "product",
+                     "类别", "category", "item"],
+    "spec": ["配置", "规格", "详情", "spec", "configuration", "config", "名称",
+             "实例规格", "实例类型", "instance", "instance_type", "型号"],
     "quantity": ["数量", "个数", "台数", "count", "quantity", "num",
-                 "用量", "最低个数"],
+                 "用量", "最低个数", "节点数", "台", "个"],
     "unit": ["单位", "unit"],
     "description": ["描述", "备注", "说明", "用途", "description", "note",
-                     "使用场景"],
+                     "使用场景", "remark"],
     "business": ["业务场景", "业务分类", "业务", "business"],
+    "price": ["价格", "费用", "月费", "年费", "price", "cost", "金额", "amount"],
 }
 
 # 扁平化关键词集合（用于快速表头行检测）
@@ -631,13 +646,6 @@ def classify_row(row_values: list, has_col_map: bool = False) -> tuple[str, dict
 
     n = len(non_empty)
 
-    # 标题行: 仅 1 个非空单元格，长文本，非纯数字
-    if n == 1:
-        val = str(non_empty[0][1]).strip()
-        if len(val) > 3 and not re.match(r'^[\d.,]+$', val):
-            return "title", {"section": val}
-        return "data", {}
-
     # 已有列映射时跳过表头检测，优先当 data 处理
     if has_col_map:
         return "data", {}
@@ -654,6 +662,13 @@ def classify_row(row_values: list, has_col_map: bool = False) -> tuple[str, dict
                 n_numeric += 1
         if n_keyword >= 2 and n_numeric == 0:
             return "header", {}
+
+    # 标题行: 仅 1 个非空单元格，长文本，非纯数字
+    if n == 1:
+        val = str(non_empty[0][1]).strip()
+        if len(val) > 3 and not re.match(r'^[\d.,]+$', val):
+            return "title", {"section": val}
+        return "data", {}
 
     return "data", {}
 
@@ -678,6 +693,81 @@ def detect_column_roles(header_values: list) -> dict[int, str]:
             roles[i] = best_role
         else:
             roles[i] = f"col_{i}"
+    return roles
+
+
+def infer_column_roles(rows: list[list]) -> dict[int, str]:
+    """当没有检测到表头时，通过内容启发式推断列角色"""
+    if not rows:
+        return {}
+
+    # 取前10行非空数据分析
+    sample_rows = []
+    for row in rows[:10]:
+        if any(v is not None and str(v).strip() for v in row):
+            sample_rows.append(row)
+
+    if not sample_rows:
+        return {}
+
+    n_cols = max(len(row) for row in sample_rows)
+    roles = {}
+
+    # 服务关键词（用于识别 service_type 列）
+    service_keywords = ["ec2", "rds", "elb", "s3", "lambda", "ecs", "eks",
+                       "计算", "数据库", "负载", "存储", "函数", "容器"]
+
+    # 规格关键词（用于识别 spec 列）
+    spec_keywords = ["c", "g", "核", "gb", "tb", "型", "规格"]
+
+    for col_idx in range(n_cols):
+        col_values = []
+        for row in sample_rows:
+            if col_idx < len(row) and row[col_idx] is not None:
+                val = str(row[col_idx]).strip()
+                if val and val.lower() != "none":
+                    col_values.append(val.lower())
+
+        if not col_values:
+            continue
+
+        # 统计这一列的特征
+        numeric_count = 0
+        service_count = 0
+        spec_count = 0
+        long_text_count = 0
+
+        for val in col_values:
+            # 纯数字或带单位的数字
+            if re.match(r'^[\d.,]+[个台台数]*$', val) or re.match(r'^\d+$', val):
+                numeric_count += 1
+
+            # 包含服务关键词
+            if any(kw in val for kw in service_keywords):
+                service_count += 1
+
+            # 包含规格描述
+            if any(kw in val for kw in spec_keywords) or re.search(r'\d+[cg]\d*[gm]?', val):
+                spec_count += 1
+
+            # 长文本描述（>20字符）
+            if len(val) > 20:
+                long_text_count += 1
+
+        total = len(col_values)
+
+        # 根据特征推断角色
+        if numeric_count >= total * 0.7:  # 70%以上是数字
+            roles[col_idx] = "quantity"
+        elif service_count >= total * 0.5:  # 50%以上包含服务关键词
+            roles[col_idx] = "service_type"
+        elif spec_count >= total * 0.5:  # 50%以上包含规格描述
+            roles[col_idx] = "spec"
+        elif long_text_count >= total * 0.5:  # 50%以上是长文本
+            roles[col_idx] = "description"
+        else:
+            roles[col_idx] = "description"  # 默认为描述
+
     return roles
 
 
@@ -754,6 +844,31 @@ def process_sheet(ws, sheet_name: str, region: str, billing_mode: str = "on-dema
             continue
 
         i += 1
+
+    # 无表头 fallback 逻辑：如果没有解析到任何条目，尝试启发式推断列角色
+    if not items and len(rows) > 0:
+        print(f"Sheet '{sheet_name}': 未检测到表头，尝试启发式推断列角色...", file=sys.stderr)
+
+        # 过滤掉空行，收集所有有效数据行
+        data_rows = []
+        for row in rows:
+            if any(v is not None and str(v).strip() for v in row):
+                data_rows.append(row)
+
+        if data_rows:
+            # 使用启发式推断列角色
+            inferred_roles = infer_column_roles(data_rows)
+
+            if inferred_roles:
+                print(f"Sheet '{sheet_name}': 推断出列角色: {inferred_roles}", file=sys.stderr)
+
+                # 重新处理所有数据行
+                for row in data_rows:
+                    item = build_item(
+                        row, inferred_roles, sheet_name, "", region, billing_mode
+                    )
+                    if item:
+                        items.append(item)
 
     return items
 
