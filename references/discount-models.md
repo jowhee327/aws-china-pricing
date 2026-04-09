@@ -40,7 +40,7 @@
 
 ### 中国区暂不可用
 - ML Savings Plans
-- Database Savings Plans（如 SageMaker SP、RDS SP）
+- Database Savings Plans
 
 ### SP 定价结构
 - 承诺每小时消费金额（$/hr）

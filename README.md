@@ -2,27 +2,16 @@
 
 [🇺🇸 English](README_EN.md)
 
-一个 OpenClaw Skill，用于查询 AWS 中国区服务价格、计算成本和生成报价单。覆盖北京区 (cn-north-1)、宁夏区 (cn-northwest-1) 和 Auto Cloud Local Zone (cn-north-1-pkx-1) 的 87 个服务。
+一个工具，用于查询 AWS 中国区服务价格、计算成本和生成报价单。覆盖北京区 (cn-north-1)、宁夏区 (cn-northwest-1) 和 Auto Cloud Local Zone (cn-north-1-pkx-1) 的 87 个服务。
 
 ## 功能特性
 
-- **智能导入** — 自然语言服务描述自动映射为 AWS ServiceCode（80+ 条规则）
-- **实时价格查询** — 通过 AWS Price List API 查询任意服务定价
-- **30 种计费模式** — Standard/Convertible RI × 1y/3y × No/Partial/All Upfront + Compute/Instance SP，智能适用性判断
-- **RI/SP 自动适配** — 只有支持 RI/SP 的服务才使用，其他服务自动使用按需价格
-- **EBS 独立服务** — EBS 作为独立服务，默认 gp3 卷类型，支持卷类型智能检测
-- **S3 存储类别智能识别** — 7 种存储类别自动检测（Standard/Intelligent-Tiering/Standard-IA/One Zone-IA/Glacier Instant/Flexible/Deep Archive）
-- **存储服务统一计费** — S3/EFS/FSx/Glacier/EBS 全部按 GB/月计费
-- **按量计费服务标注** — Lambda/SQS/SNS/API Gateway 等服务标注"按量计费"
-- **EDP/PPA 折扣** — 企业折扣计划和私有定价折扣，支持配置叠加顺序，EDP 折扣显示在报价单头部
-- **批量成本计算** — 导入 CSV/Excel 工作负载，计算整体方案成本
-- **Excel 报价单** — 生成正式报价单，含客户信息、有效期、明细和汇总
-- **规格推荐** — 根据 vCPU/内存需求推荐最优实例类型，按性价比排序
-- **数据传输费** — 出公网（阶梯定价）、跨 AZ、同区域、CloudFront 分发
-- **双区域对比** — 北京 vs 宁夏同配置价格并列对比
-- **税费支持** — 可选 6% 增值税（中国区云服务税率）
-- **价格缓存** — Bulk API 下载 + 索引化本地缓存，增量更新
-- **87 个服务统一显示名** — 所有服务使用规范化中英文显示名
+- **智能导入** — 任意格式 Excel/CSV 自动识别
+- **实时价格查询** — 95+ 服务
+- **RI/SP 支持** — Standard/Convertible RI + Compute/Instance SP
+- **折扣支持** — EDP/PPA
+- **Excel 报价单生成**
+- **实例推荐**
 
 ## 前置条件
 
@@ -183,13 +172,11 @@ python3 scripts/update_prices.py --region cn-north-1 --force
 - `ri-convertible-3yr-partial` - Convertible RI 3年期 部分预付
 - `ri-convertible-3yr-all` - Convertible RI 3年期 全预付
 
-### Savings Plans (6 种)
+### Savings Plans (4 种)
 - `sp-compute-1yr` - Compute Savings Plans 1年期
 - `sp-compute-3yr` - Compute Savings Plans 3年期
 - `sp-instance-1yr` - EC2 Instance Savings Plans 1年期
 - `sp-instance-3yr` - EC2 Instance Savings Plans 3年期
-- `sp-sagemaker-1yr` - SageMaker Savings Plans 1年期
-- `sp-sagemaker-3yr` - SageMaker Savings Plans 3年期
 
 ### 其他模式 (12 种)
 - `on-demand` - 按需付费（默认）
@@ -337,7 +324,7 @@ tax:
 
 ```
 aws-china-pricing/
-├── SKILL.md                    # OpenClaw Skill 入口
+├── SKILL.md                    # Skill 入口
 ├── discount-config.yaml        # EDP/PPA 折扣配置
 ├── scripts/
 │   ├── smart_import.py         # 智能导入（自然语言 → AWS 服务映射）

@@ -2,22 +2,16 @@
 
 [🇨🇳 中文版](README.md)
 
-An OpenClaw Skill for querying AWS China region pricing, calculating costs, and generating quotes. Covers all 95+ services across Beijing (cn-north-1), Ningxia (cn-northwest-1), and Auto Cloud Local Zone (cn-north-1-pkx-1).
+A tool for querying AWS China region pricing, calculating costs, and generating quotes. Covers all 95+ services across Beijing (cn-north-1), Ningxia (cn-northwest-1), and Auto Cloud Local Zone (cn-north-1-pkx-1).
 
 ## Features
 
-- **Smart Import** — Natural language service descriptions auto-mapped to AWS service codes (80+ rules)
-- **Real-time Price Query** — Query any service via AWS Price List API
-- **Full RI Coverage** — Standard & Convertible RI, 1yr/3yr, No/Partial/All Upfront (12 combinations)
-- **Savings Plans** — Compute SP + EC2 Instance SP pricing and comparison
-- **EDP/PPA Discounts** — Enterprise Discount Program & Private Pricing Addendum with configurable stacking
-- **Batch Cost Calculation** — Import CSV/Excel workloads for total cost estimation
-- **Excel Quote Generation** — Professional quotes with customer info, validity dates, and line items
-- **Instance Recommendation** — Recommend instance types based on vCPU/memory requirements
-- **Data Transfer Costs** — Internet egress (tiered), cross-AZ, same-region, CloudFront
-- **Multi-Region Comparison** — Side-by-side pricing for Beijing vs Ningxia
-- **Tax Support** — Optional 6% VAT (China cloud services tax rate)
-- **Price Cache & Updates** — Bulk API download with indexed local cache, incremental updates
+- **Smart Import** — Auto-mapping Excel/CSV with any format
+- **Real-time Price Query** — 95+ services
+- **RI/SP Support** — Standard/Convertible RI + Compute/Instance SP
+- **Discount Support** — EDP/PPA
+- **Excel Quote Generation**
+- **Instance Recommendation**
 
 ## Prerequisites
 
@@ -199,7 +193,7 @@ When both sources return no results, the tool prompts you to run `update_prices.
 
 ```
 aws-china-pricing/
-├── SKILL.md                    # OpenClaw skill entry point
+├── SKILL.md                    # Skill entry point
 ├── discount-config.yaml        # EDP/PPA discount configuration
 ├── scripts/
 │   ├── smart_import.py         # Natural language → AWS service mapping
