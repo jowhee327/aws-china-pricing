@@ -174,6 +174,9 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
                            or item.get("volumeapiname") or "gp3")
         user_filters["volumeApiName"] = volume_api_name
     else:
+        # 通用 productFamily 过滤器（如 NAT Gateway, Load Balancer 等）
+        if product_family:
+            user_filters["productFamily"] = product_family
         if instance_type:
             user_filters["instanceType"] = instance_type
         if item.get("os"):

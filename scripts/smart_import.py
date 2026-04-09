@@ -36,10 +36,18 @@ from pathlib import Path
 # 每条规则: (关键词列表, ServiceCode, 附加字段 dict)
 # 关键词全部小写，匹配时也先 lower()
 SERVICE_RULES: list[tuple[list[str], str, dict]] = [
+    # ── 存储类（优先匹配，避免与计算类关键词冲突）──
+    (["ebs", "块存储", "弹性块存储", "弹性块", "ssd存储", "通用ssd", "通用SSD",
+      "云盘", "block storage"], "AmazonEBS", {"productFamily": "Storage",
+                                              "volumeApiName": "gp3"}),
+
+    # ── 运维/管理类（优先匹配，避免与计算类关键词冲突）──
+    (["backup", "备份", "云备份"], "AWSBackup", {}),
+
     # ── 计算类 ──
-    (["compute", "计算", "服务器", "虚拟机", "vm", "server", "ec2", "ecs",
+    (["compute", "计算", "服务器", "虚拟机", "vm", "server", "ec2",
       "云服务器"], "AmazonEC2", {}),
-    (["container", "容器", "fargate", "ecs容器", "docker"], "AmazonECS", {}),
+    (["container", "容器", "fargate", "ecs容器", "ecs", "docker"], "AmazonECS", {}),
     (["k8s", "kubernetes", "eks"], "AmazonEKS", {}),
     (["ecr", "容器注册", "container registry", "镜像仓库"], "AmazonECR", {}),
     (["serverless", "无服务器", "lambda", "函数计算", "function"], "AWSLambda", {}),
@@ -74,9 +82,6 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     (["fsx", "windows文件", "lustre"], "AmazonFSx", {}),
     (["efs", "文件存储", "弹性文件服务", "弹性文件", "nfs", "nas",
       "file storage"], "AmazonEFS", {}),
-    (["ebs", "块存储", "弹性块存储", "弹性块", "ssd存储", "通用ssd", "通用SSD",
-      "云盘", "block storage"], "AmazonEBS", {"productFamily": "Storage",
-                                              "volumeApiName": "gp3"}),
     (["对象存储", "s3", "oss", "object storage"], "AmazonS3", {}),
 
     # ── 网络类 ──
@@ -137,7 +142,6 @@ SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     # ── 运维/管理 ──
     (["cloudwatch", "监控", "告警", "日志服务", "云监控"], "AmazonCloudWatch", {}),
     (["cloudtrail", "日志审计"], "AWSCloudTrail", {}),
-    (["backup", "备份", "云备份"], "AWSBackup", {}),
     (["workspaces", "桌面", "云桌面", "vdi"], "AmazonWorkSpaces", {}),
     (["dms", "数据迁移", "数据库迁移"], "AWSDatabaseMigrationSvc", {}),
     (["drs", "数据复制"], "AWSDatabaseMigrationSvc", {}),  # DRS → DMS
@@ -524,7 +528,13 @@ def extract_spec(text: str) -> dict:
         if sm:
             info["storage_gb"] = int(sm.group(1))
 
-    # 2. 独立内存 (没有 CPU 信息时): "8G", "8G-Cluster", "4G内存"
+    # 1.1. 独立 CPU: "4核", "8核", "16核" (没有 CPU 信息时)
+    if "vcpu" not in info:
+        m = re.search(r'(\d+)\s*核', text)
+        if m:
+            info["vcpu"] = int(m.group(1))
+
+    # 2. 独立内存: "8G", "8GiB", "8G-Cluster", "4G内存"
     if "memory" not in info:
         for mm in re.finditer(
             r'(\d+)\s*[gG][iI]?[bB]?\s*(?:[-\s]|内存|memory|cluster|$)',
@@ -539,10 +549,10 @@ def extract_spec(text: str) -> dict:
                 info["memory"] = int(mm.group(1))
                 break
 
-    # 3. 存储: "存储128G", "1TB", "500G存储", "100GB", "2TB"
+    # 3. 存储: "存储128G", "1TB", "10T", "500G存储", "100GB", "2TB", "=7500G"
     if "storage_gb" not in info:
-        # TB 格式
-        m = re.search(r'(\d+)\s*[tT][bB]', text)
+        # TB 格式（包括不带B的格式）
+        m = re.search(r'(\d+)\s*[tT][bB]?(?![a-zA-Z])', text)
         if m:
             info["storage_gb"] = int(m.group(1)) * 1024
         else:
@@ -550,7 +560,8 @@ def extract_spec(text: str) -> dict:
             patterns = [
                 r'(?:存储|storage|磁盘|disk)\s*(\d+)\s*[gG][bB]?',  # "存储100G"
                 r'(\d+)\s*[gG][bB]?\s*(?:存储|storage|磁盘|disk)',  # "100G存储"
-                r'(\d+)\s*[gG][bB](?![a-zA-Z])',  # "100GB" (确保GB后面没有其他字母)
+                r'=\s*(\d+)\s*[gG][bB]?',  # "=7500G"
+                r'(\d+)\s*[gG][bB]?(?![a-zA-Z])',  # "100GB" (确保GB后面没有其他字母)
             ]
             for pattern in patterns:
                 m = re.search(pattern, text, re.IGNORECASE)
@@ -934,6 +945,12 @@ def build_item(row_values: list, column_roles: dict[int, str],
             service_code = service_text.strip() if service_text.strip() else "UNKNOWN"
             warning = ""
 
+    # ── 非标准服务检测 ──
+    known_codes = {sc for _, sc, _ in SERVICE_RULES}
+    is_non_standard_service = (service_code not in known_codes
+                              and not service_code.startswith(('Amazon', 'AWS'))
+                              and service_code != "UNKNOWN")
+
     # ── 数量解析 ──
     qty, qty_note = parse_quantity(quantity_text)
 
@@ -1029,6 +1046,15 @@ def build_item(row_values: list, column_roles: dict[int, str],
                 notes_parts.insert(0, note)
             else:
                 notes_parts.append(note)
+
+    # ── 非标准服务备注 ──
+    if is_non_standard_service:
+        non_standard_note = "非AWS标准服务"
+        # 检查是否有替代建议
+        if service_code in NON_STANDARD_SERVICE_SUGGESTIONS:
+            suggestion = NON_STANDARD_SERVICE_SUGGESTIONS[service_code]
+            non_standard_note = f"非AWS标准服务，{suggestion}"
+        notes_parts.append(non_standard_note)
 
     result = {
         "sheet_name": sheet_name,
