@@ -359,26 +359,26 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
 
         if is_storage_service:
             # 存储服务：F列显示 storage_gb，H列显示 GB月单价
-            usage_display = r.get("storage_gb", 0)
-            price_display = hourly  # per GB-month 单价
+            usage_display = float(r.get("storage_gb", 0) or 0)  # 确保是数字
+            price_display = float(hourly or 0)  # per GB-month 单价
         else:
             # 其他服务：显示 usage_hours 和 hourly
-            usage_display = r.get("usage_hours", 720)
-            price_display = hourly
+            usage_display = float(r.get("usage_hours", 720) or 720)  # 确保是数字
+            price_display = float(hourly or 0)
 
         values = [
             idx,
             service_name,
             r.get("instance_type", ""),
             region_name,
-            r.get("quantity", 1),
-            usage_display,
+            int(r.get("quantity", 1) or 1),  # 确保是数字
+            usage_display,  # 已确保是数字
             billing_name,
-            price_display,
+            price_display,  # 已确保是数字
             None,  # 月费/台 = 公式
             None,  # 月费合计 = 公式
             None,  # 年费合计 = 公式
-            r.get("upfront_total", 0),
+            float(r.get("upfront_total", 0) or 0),  # 确保是数字
             notes,
             r.get("original_request", ""),
         ]
