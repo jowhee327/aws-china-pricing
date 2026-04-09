@@ -43,7 +43,7 @@ python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
 python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
   --include-tax
 
-# 指定计费模式（30 种模式）
+# 指定计费模式
 python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
   --billing-mode ri-standard-1yr-partial
 ```
@@ -154,45 +154,6 @@ python3 scripts/update_prices.py --region cn-north-1 --force
 
 > **重要**: Savings Plans 数据必须先通过 `update_prices.py` 下载，才能查询 SP 价格（SP 数据不在 Query API 中）。
 
-## 30 种计费模式
-
-支持以下 30 种计费模式，通过 `--billing-mode` 参数指定：
-
-### Reserved Instances (12 种)
-- `ri-standard-1yr-no` - Standard RI 1年期 无预付
-- `ri-standard-1yr-partial` - Standard RI 1年期 部分预付  
-- `ri-standard-1yr-all` - Standard RI 1年期 全预付
-- `ri-standard-3yr-no` - Standard RI 3年期 无预付
-- `ri-standard-3yr-partial` - Standard RI 3年期 部分预付
-- `ri-standard-3yr-all` - Standard RI 3年期 全预付
-- `ri-convertible-1yr-no` - Convertible RI 1年期 无预付
-- `ri-convertible-1yr-partial` - Convertible RI 1年期 部分预付
-- `ri-convertible-1yr-all` - Convertible RI 1年期 全预付
-- `ri-convertible-3yr-no` - Convertible RI 3年期 无预付
-- `ri-convertible-3yr-partial` - Convertible RI 3年期 部分预付
-- `ri-convertible-3yr-all` - Convertible RI 3年期 全预付
-
-### Savings Plans (4 种)
-- `sp-compute-1yr` - Compute Savings Plans 1年期
-- `sp-compute-3yr` - Compute Savings Plans 3年期
-- `sp-instance-1yr` - EC2 Instance Savings Plans 1年期
-- `sp-instance-3yr` - EC2 Instance Savings Plans 3年期
-
-### 其他模式 (12 种)
-- `on-demand` - 按需付费（默认）
-- `spot` - Spot 实例
-- `dedicated-host` - 专用主机
-- `dedicated-instance` - 专用实例
-- `mixed-ri-od` - 混合模式：RI + On-Demand
-- `mixed-sp-od` - 混合模式：SP + On-Demand
-- `mixed-ri-spot` - 混合模式：RI + Spot
-- `mixed-sp-spot` - 混合模式：SP + Spot
-- `prepaid` - 预付费
-- `postpaid` - 后付费
-- `pay-per-use` - 按量计费
-- `serverless` - Serverless 计费
-
-> **智能适配**: 只有支持 RI/SP 的服务（如 EC2、RDS）才会使用指定的 RI/SP 模式，不支持的服务自动 fallback 到按需价格。
 
 ## CSV 输入格式
 
@@ -209,58 +170,7 @@ AmazonEC2,cn-north-1,,,,1,,on-demand,,,,,out_to_internet,5000,"出公网 5TB"
 
 完整字段说明见 [references/input-format.md](references/input-format.md)。
 
-## 存储服务特性
 
-### S3 存储类别智能检测
-
-支持 7 种 S3 存储类别的价格查询：
-
-| 存储类别 | `storageClass` 值 | 用途 |
-|----------|-------------------|------|
-| 标准存储 | Standard | 频繁访问数据 |
-| 智能分层 | IntelligentTiering | 自动优化存储成本 |
-| 标准-低频 | StandardInfrequentAccess | 不频繁访问 |
-| 单区域-低频 | OneZoneInfrequentAccess | 单AZ不频繁访问 |
-| Glacier 即时检索 | GlacierInstantRetrieval | 毫秒级检索归档 |
-| Glacier 灵活检索 | GlacierFlexibleRetrieval | 分钟到小时检索 |
-| Glacier 深度归档 | GlacierDeepArchive | 12小时检索长期归档 |
-
-### EBS 独立服务
-
-EBS 作为独立服务 (ServiceCode: AmazonEBS)，支持卷类型检测：
-
-| 卷类型 | `volumeType` 值 | 特性 |
-|--------|----------------|------|
-| 通用型 SSD | gp3 | 默认类型，性价比最优 |
-| 通用型 SSD | gp2 | 传统通用型 |
-| 预配置 IOPS SSD | io2 | 高性能数据库 |
-| 预配置 IOPS SSD | io1 | 传统高性能 |
-| 吞吐优化 HDD | st1 | 大数据分析 |
-| Cold HDD | sc1 | 低频访问数据 |
-
-### 存储计费统一
-
-所有存储服务统一按 **GB/月** 计费：
-- **S3**: 各存储类别按实际用量
-- **EFS**: 按文件系统大小  
-- **FSx**: 按文件系统容量
-- **EBS**: 按卷大小
-- **Glacier**: 按归档数据量
-
-## 按量计费服务
-
-以下服务标注为"按量计费"，不使用按小时计费：
-
-- **Lambda**: 按请求次数和执行时间
-- **API Gateway**: 按 API 调用次数
-- **SQS**: 按消息数量
-- **SNS**: 按通知数量
-- **DynamoDB**: 按读写容量单位
-- **CloudWatch**: 按指标和日志量
-- **S3**: 按存储量和请求数
-- **CloudFront**: 按数据传输量
-
-这些服务在报价单中显示默认用量估算值，避免 $0 价格误导。
 
 ## 折扣配置
 
@@ -351,22 +261,6 @@ aws-china-pricing/
 | cn-northwest-1 | 宁夏区 | 西云数据 (NWCD) |
 | cn-north-1-pkx-1 | Auto Cloud Local Zone | — |
 
-## 版本历史
-
-### v1.7.3 (最新)
-- ✅ 30 种计费模式支持，智能适用性判断
-- ✅ EBS 独立服务，gp3 默认卷类型
-- ✅ S3 七种存储类别智能检测
-- ✅ 存储服务统一 per-GB-month 计费
-- ✅ 按量计费服务标注和默认用量
-- ✅ EDP 折扣显示在报价单头部
-- ✅ 87 个服务统一显示名规范
-- ✅ 自动使用 AWS CLI 默认 profile
-
-### v1.5.4
-- ✅ 基础价格查询和 RI/SP 支持
-- ✅ 智能导入和 Excel 报价单生成
-- ✅ EDP/PPA 折扣配置
 
 ## 许可证
 
