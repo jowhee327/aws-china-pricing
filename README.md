@@ -1,171 +1,288 @@
-# AWS China Pricing Skill
+# AWS 中国区定价查询 Skill
 
-[🇨🇳 中文版](README_CN.md)
+[🇺🇸 English](README_EN.md)
 
-An OpenClaw Skill for querying AWS China region pricing, calculating costs, and generating quotes. Covers all 95+ services across Beijing (cn-north-1), Ningxia (cn-northwest-1), and Auto Cloud Local Zone (cn-north-1-pkx-1).
+一个 OpenClaw Skill，用于查询 AWS 中国区服务价格、计算成本和生成报价单。覆盖北京区 (cn-north-1)、宁夏区 (cn-northwest-1) 和 Auto Cloud Local Zone (cn-north-1-pkx-1) 的 87 个服务。
 
-## Features
+## 功能特性
 
-- **Smart Import** — Natural language service descriptions auto-mapped to AWS service codes (80+ rules)
-- **Real-time Price Query** — Query any service via AWS Price List API
-- **Full RI Coverage** — Standard & Convertible RI, 1yr/3yr, No/Partial/All Upfront (12 combinations)
-- **Savings Plans** — Compute SP + EC2 Instance SP pricing and comparison
-- **EDP/PPA Discounts** — Enterprise Discount Program & Private Pricing Addendum with configurable stacking
-- **Batch Cost Calculation** — Import CSV/Excel workloads for total cost estimation
-- **Excel Quote Generation** — Professional quotes with customer info, validity dates, and line items
-- **Instance Recommendation** — Recommend instance types based on vCPU/memory requirements
-- **Data Transfer Costs** — Internet egress (tiered), cross-AZ, same-region, CloudFront
-- **Multi-Region Comparison** — Side-by-side pricing for Beijing vs Ningxia
-- **Tax Support** — Optional 6% VAT (China cloud services tax rate)
-- **Price Cache & Updates** — Bulk API download with indexed local cache, incremental updates
+- **智能导入** — 自然语言服务描述自动映射为 AWS ServiceCode（80+ 条规则）
+- **实时价格查询** — 通过 AWS Price List API 查询任意服务定价
+- **30 种计费模式** — Standard/Convertible RI × 1y/3y × No/Partial/All Upfront + Compute/Instance SP，智能适用性判断
+- **RI/SP 自动适配** — 只有支持 RI/SP 的服务才使用，其他服务自动使用按需价格
+- **EBS 独立服务** — EBS 作为独立服务，默认 gp3 卷类型，支持卷类型智能检测
+- **S3 存储类别智能识别** — 7 种存储类别自动检测（Standard/Intelligent-Tiering/Standard-IA/One Zone-IA/Glacier Instant/Flexible/Deep Archive）
+- **存储服务统一计费** — S3/EFS/FSx/Glacier/EBS 全部按 GB/月计费
+- **按量计费服务标注** — Lambda/SQS/SNS/API Gateway 等服务标注"按量计费"
+- **EDP/PPA 折扣** — 企业折扣计划和私有定价折扣，支持配置叠加顺序，EDP 折扣显示在报价单头部
+- **批量成本计算** — 导入 CSV/Excel 工作负载，计算整体方案成本
+- **Excel 报价单** — 生成正式报价单，含客户信息、有效期、明细和汇总
+- **规格推荐** — 根据 vCPU/内存需求推荐最优实例类型，按性价比排序
+- **数据传输费** — 出公网（阶梯定价）、跨 AZ、同区域、CloudFront 分发
+- **双区域对比** — 北京 vs 宁夏同配置价格并列对比
+- **税费支持** — 可选 6% 增值税（中国区云服务税率）
+- **价格缓存** — Bulk API 下载 + 索引化本地缓存，增量更新
+- **87 个服务统一显示名** — 所有服务使用规范化中英文显示名
 
-## Prerequisites
+## 前置条件
 
-- **AWS CLI** configured with a China region profile
+- **AWS CLI** 已配置并有中国区访问权限
 - **Python 3.10+**
-- **pip packages**: `openpyxl`, `pyyaml`
+- **pip 依赖**: `openpyxl`, `pyyaml`
 
 ```bash
 pip install openpyxl pyyaml
 ```
 
-### AWS CLI Configuration
+> **说明**: 工具自动使用 AWS CLI 默认 profile，无需手动指定 --profile。Pricing API 的 endpoint 在 `cn-northwest-1`，使用任一中国区域的凭证即可。
 
-The skill expects a profile named `cn-north-1` with access to the Pricing API:
+## 快速开始
 
-```ini
-# ~/.aws/credentials
-[cn-north-1]
-aws_access_key_id = YOUR_KEY
-aws_secret_access_key = YOUR_SECRET
+### 0. 一键生成 Excel 报价单（推荐）
 
-# ~/.aws/config
-[profile cn-north-1]
-region = cn-north-1
-```
-
-> **Note**: The Pricing API endpoint is in `cn-northwest-1`, but works with credentials from either China region.
-
-## Quick Start
-
-### 0. One-Click Excel Quote (Recommended)
-
-Input Excel/CSV with natural language descriptions, output a professional Excel quote in one command:
+输入 Excel/CSV，一条命令直接输出正式 Excel 报价单：
 
 ```bash
-# Simplest: input Excel → output {filename}_报价单.xlsx
+# 最简用法：输入 Excel，输出 {文件名}_报价单.xlsx
 python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1
 
-# With customer name
+# 指定客户名称
 python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
-  --customer "ACME Corp"
+  --customer "客户公司名称"
 
-# Include 6% VAT
+# 含 6% 增值税
 python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
   --include-tax
+
+# 指定计费模式（30 种模式）
+python3 scripts/smart_import.py --input workload.xlsx --region cn-north-1 \
+  --billing-mode ri-standard-1yr-partial
 ```
 
-Don't know the exact AWS service codes? Just describe what you need:
+不需要知道精确的 AWS ServiceCode，直接描述你的需求：
 
 ```csv
 类型,规格,数量,备注
 计算,8C16G,20,Web服务器
 MySQL数据库,4C32G,2,业务库
 Redis缓存,4G内存,3,Session缓存
-对象存储,1TB,,文件存储
+对象存储 Standard,1TB,,文件存储
+EBS gp3,500GB,,系统盘
 Kafka消息队列,,2,异步消息
+Lambda 函数,,1000万次/月,按量计费
 ```
 
-Supports 80+ mapping rules covering all 95 China region services in Chinese/English, with auto-detection of:
-- Engine type: "MySQL" → `engine=MySQL`, "Redis" → `engine=Redis`
-- Instance specs: "8C16G" → `vCPU=8, memory=16` → recommends best-fit instance
-- Storage sizes: "1TB" → `storage_gb=1024`
+支持 80+ 条映射规则，覆盖全部 87 个中国区服务，自动识别：
+- 引擎类型："MySQL" → engine=MySQL，"Redis" → engine=Redis
+- 实例规格："8C16G" → vCPU=8, memory=16 → 自动推荐最优实例
+- 存储容量："1TB" → storage_gb=1024
+- S3 存储类别："Standard"/"IA"/"Glacier" 等
+- EBS 卷类型："gp3"/"io2"/"st1" 等
 
-### 1. Query a Single Service
+### 1. 查询单个服务价格
 
 ```bash
-# EC2 instance pricing
+# EC2 实例价格
 python3 scripts/query_price.py -s AmazonEC2 -r cn-north-1 \
   -f instanceType=c6i.xlarge operatingSystem=Linux tenancy=Shared \
      capacitystatus=Used preInstalledSw=NA
 
-# RDS pricing
+# RDS 价格
 python3 scripts/query_price.py -s AmazonRDS -r cn-north-1 \
   -f instanceType=db.r6g.xlarge databaseEngine=MySQL
 
-# Full comparison (On-Demand vs RI vs Savings Plans)
+# EBS 价格（独立服务）
+python3 scripts/query_price.py -s AmazonEBS -r cn-north-1 \
+  -f volumeType=gp3
+
+# S3 不同存储类别价格
+python3 scripts/query_price.py -s AmazonS3 -r cn-north-1 \
+  -f storageClass=Standard
+python3 scripts/query_price.py -s AmazonS3 -r cn-north-1 \
+  -f storageClass=StandardInfrequentAccess
+
+# 完整费率对比（On-Demand vs RI vs Savings Plans）
 python3 scripts/query_price.py -s AmazonEC2 -r cn-north-1 \
   -f instanceType=c6i.xlarge operatingSystem=Linux tenancy=Shared \
      capacitystatus=Used preInstalledSw=NA \
   --compare --savings-plans
+
+# 指定计费模式查询
+python3 scripts/query_price.py -s AmazonEC2 -r cn-north-1 \
+  -f instanceType=c6i.xlarge operatingSystem=Linux \
+  --billing-mode ri-convertible-3yr-all
 ```
 
-### 2. Recommend Instances
+### 2. 规格推荐
 
 ```bash
-# General purpose, 8 vCPU, 32 GB RAM
+# 通用型，8 vCPU，32 GB 内存
 python3 scripts/recommend_instance.py --vcpu 8 --memory 32 --region cn-north-1
 
-# Compute optimized
-python3 scripts/recommend_instance.py --vcpu 4 --memory 16 --workload compute --region cn-northwest-1
+# 计算密集型，指定计费模式
+python3 scripts/recommend_instance.py --vcpu 4 --memory 16 --workload compute \
+  --region cn-northwest-1 --billing-mode sp-compute-1yr
 ```
 
-### 3. Batch Cost Calculation
+### 3. 批量成本计算
 
 ```bash
-# Calculate from CSV
+# 从 CSV 文件计算
 python3 scripts/calculate_cost.py --input workload.csv --region cn-north-1
 
-# With EDP/PPA discounts
+# 含 EDP/PPA 折扣
 python3 scripts/calculate_cost.py --input workload.csv --region cn-north-1 \
   --discount-config discount-config.yaml
 
-# Include 6% VAT
+# 含 6% 增值税
 python3 scripts/calculate_cost.py --input workload.csv --region cn-north-1 --include-tax
+
+# 指定默认计费模式
+python3 scripts/calculate_cost.py --input workload.csv --region cn-north-1 \
+  --billing-mode ri-standard-1yr-partial
 ```
 
-### 4. Generate Excel Quote
+### 4. 生成 Excel 报价单
 
 ```bash
 python3 scripts/generate_quote.py --input workload.csv --region cn-north-1 \
-  --customer "ACME Corp" --validity 30 --output quote.xlsx
+  --customer "客户公司名称" --validity 30 --output quote.xlsx \
+  --billing-mode ri-standard-1yr-partial
 ```
 
-### 5. Update Price Cache
+### 5. 更新价格缓存
 
 ```bash
-# Update all services for a region
+# 更新某区域所有服务
 python3 scripts/update_prices.py --region cn-north-1
 
-# Update specific services
-python3 scripts/update_prices.py --region cn-north-1 --services AmazonEC2,AmazonRDS
+# 只更新特定服务
+python3 scripts/update_prices.py --region cn-north-1 --services AmazonEC2,AmazonRDS,AmazonEBS
 
-# Force re-download
+# 强制重新下载
 python3 scripts/update_prices.py --region cn-north-1 --force
 ```
 
-> **Important**: Savings Plans data must be downloaded via `update_prices.py` before SP queries work (SP data is not available through the Query API).
+> **重要**: Savings Plans 数据必须先通过 `update_prices.py` 下载，才能查询 SP 价格（SP 数据不在 Query API 中）。
 
-## CSV Input Format
+## 30 种计费模式
+
+支持以下 30 种计费模式，通过 `--billing-mode` 参数指定：
+
+### Reserved Instances (12 种)
+- `ri-standard-1yr-no` - Standard RI 1年期 无预付
+- `ri-standard-1yr-partial` - Standard RI 1年期 部分预付  
+- `ri-standard-1yr-all` - Standard RI 1年期 全预付
+- `ri-standard-3yr-no` - Standard RI 3年期 无预付
+- `ri-standard-3yr-partial` - Standard RI 3年期 部分预付
+- `ri-standard-3yr-all` - Standard RI 3年期 全预付
+- `ri-convertible-1yr-no` - Convertible RI 1年期 无预付
+- `ri-convertible-1yr-partial` - Convertible RI 1年期 部分预付
+- `ri-convertible-1yr-all` - Convertible RI 1年期 全预付
+- `ri-convertible-3yr-no` - Convertible RI 3年期 无预付
+- `ri-convertible-3yr-partial` - Convertible RI 3年期 部分预付
+- `ri-convertible-3yr-all` - Convertible RI 3年期 全预付
+
+### Savings Plans (6 种)
+- `sp-compute-1yr` - Compute Savings Plans 1年期
+- `sp-compute-3yr` - Compute Savings Plans 3年期
+- `sp-instance-1yr` - EC2 Instance Savings Plans 1年期
+- `sp-instance-3yr` - EC2 Instance Savings Plans 3年期
+- `sp-sagemaker-1yr` - SageMaker Savings Plans 1年期
+- `sp-sagemaker-3yr` - SageMaker Savings Plans 3年期
+
+### 其他模式 (12 种)
+- `on-demand` - 按需付费（默认）
+- `spot` - Spot 实例
+- `dedicated-host` - 专用主机
+- `dedicated-instance` - 专用实例
+- `mixed-ri-od` - 混合模式：RI + On-Demand
+- `mixed-sp-od` - 混合模式：SP + On-Demand
+- `mixed-ri-spot` - 混合模式：RI + Spot
+- `mixed-sp-spot` - 混合模式：SP + Spot
+- `prepaid` - 预付费
+- `postpaid` - 后付费
+- `pay-per-use` - 按量计费
+- `serverless` - Serverless 计费
+
+> **智能适配**: 只有支持 RI/SP 的服务（如 EC2、RDS）才会使用指定的 RI/SP 模式，不支持的服务自动 fallback 到按需价格。
+
+## CSV 输入格式
 
 ```csv
-service,region,instance_type,os,engine,quantity,hours_per_month,billing_mode,transfer_type,transfer_gb,notes
-AmazonEC2,cn-north-1,c6i.xlarge,Linux,,10,730,on-demand,,,Web servers
-AmazonEC2,cn-north-1,m6i.2xlarge,Linux,,5,730,ri-standard-1yr-partial,,,App servers
-AmazonRDS,cn-north-1,db.r6g.xlarge,,MySQL,2,730,on-demand,,,Database
-AmazonEC2,cn-north-1,,,,1,,on-demand,out_to_internet,5000,Egress 5TB
+service,region,instance_type,os,engine,quantity,hours_per_month,billing_mode,storage_gb,storage_class,volume_type,transfer_type,transfer_gb,notes
+AmazonEC2,cn-north-1,c6i.xlarge,Linux,,10,730,ri-standard-1yr-partial,,,,,,"Web 服务器"
+AmazonRDS,cn-north-1,db.r6g.xlarge,,MySQL,2,730,on-demand,,,,,,"数据库"
+AmazonEBS,cn-north-1,,,,5,,on-demand,500,,gp3,,,"系统盘"
+AmazonS3,cn-north-1,,,,1,,on-demand,1024,Standard,,,,"对象存储"
+AmazonS3,cn-north-1,,,,1,,on-demand,500,StandardInfrequentAccess,,,,"归档存储"
+AWSLambda,cn-north-1,,,,10000000,,pay-per-use,,,,,,"按量计费函数"
+AmazonEC2,cn-north-1,,,,1,,on-demand,,,,,out_to_internet,5000,"出公网 5TB"
 ```
 
-See [references/input-format.md](references/input-format.md) for full field documentation.
+完整字段说明见 [references/input-format.md](references/input-format.md)。
 
-## Discount Configuration
+## 存储服务特性
 
-Edit `discount-config.yaml`:
+### S3 存储类别智能检测
+
+支持 7 种 S3 存储类别的价格查询：
+
+| 存储类别 | `storageClass` 值 | 用途 |
+|----------|-------------------|------|
+| 标准存储 | Standard | 频繁访问数据 |
+| 智能分层 | IntelligentTiering | 自动优化存储成本 |
+| 标准-低频 | StandardInfrequentAccess | 不频繁访问 |
+| 单区域-低频 | OneZoneInfrequentAccess | 单AZ不频繁访问 |
+| Glacier 即时检索 | GlacierInstantRetrieval | 毫秒级检索归档 |
+| Glacier 灵活检索 | GlacierFlexibleRetrieval | 分钟到小时检索 |
+| Glacier 深度归档 | GlacierDeepArchive | 12小时检索长期归档 |
+
+### EBS 独立服务
+
+EBS 作为独立服务 (ServiceCode: AmazonEBS)，支持卷类型检测：
+
+| 卷类型 | `volumeType` 值 | 特性 |
+|--------|----------------|------|
+| 通用型 SSD | gp3 | 默认类型，性价比最优 |
+| 通用型 SSD | gp2 | 传统通用型 |
+| 预配置 IOPS SSD | io2 | 高性能数据库 |
+| 预配置 IOPS SSD | io1 | 传统高性能 |
+| 吞吐优化 HDD | st1 | 大数据分析 |
+| Cold HDD | sc1 | 低频访问数据 |
+
+### 存储计费统一
+
+所有存储服务统一按 **GB/月** 计费：
+- **S3**: 各存储类别按实际用量
+- **EFS**: 按文件系统大小  
+- **FSx**: 按文件系统容量
+- **EBS**: 按卷大小
+- **Glacier**: 按归档数据量
+
+## 按量计费服务
+
+以下服务标注为"按量计费"，不使用按小时计费：
+
+- **Lambda**: 按请求次数和执行时间
+- **API Gateway**: 按 API 调用次数
+- **SQS**: 按消息数量
+- **SNS**: 按通知数量
+- **DynamoDB**: 按读写容量单位
+- **CloudWatch**: 按指标和日志量
+- **S3**: 按存储量和请求数
+- **CloudFront**: 按数据传输量
+
+这些服务在报价单中显示默认用量估算值，避免 $0 价格误导。
+
+## 折扣配置
+
+编辑 `discount-config.yaml`：
 
 ```yaml
 edp:
   enabled: true
-  discount_pct: 8  # 8% EDP discount
+  discount_pct: 8  # 8% EDP 折扣，显示在报价单头部
 
 ppa:
   enabled: true
@@ -176,56 +293,94 @@ ppa:
       discount_pct: 5
 
 discount_stack_order:
-  - ppa   # Apply PPA first
-  - edp   # Then EDP on top
+  - ppa   # 先应用 PPA
+  - edp   # 再叠加 EDP
 
 tax:
   vat_rate: 6
-  include_tax: false  # Default: prices exclude VAT
+  include_tax: false  # 默认不含税
 ```
 
-See [references/discount-models.md](references/discount-models.md) for detailed discount model documentation.
+折扣模型详解见 [references/discount-models.md](references/discount-models.md)。
 
-## Data Sources
+## 数据源优先级
 
-| Priority | Source | Description |
-|----------|--------|-------------|
-| 1 | Price List Query API | Real-time, per-product queries |
-| 2 | Local Cache (Bulk API) | Pre-downloaded & indexed JSON files |
+| 优先级 | 数据源 | 说明 |
+|--------|--------|------|
+| 1 | Price List Query API | 实时精确查询 |
+| 2 | 本地缓存 (Bulk API) | 预下载 + 索引化的 JSON 文件 |
 
-When both sources return no results, the tool prompts you to run `update_prices.py`.
+两个数据源都无结果时，工具会提示运行 `update_prices.py` 更新缓存。
 
-## Project Structure
+## 87 个中国区服务
+
+支持所有 87 个 AWS 中国区服务的价格查询，统一显示名规范：
+
+| 服务类别 | 主要服务 | 显示名 |
+|----------|----------|--------|
+| 计算 | AmazonEC2 | EC2 |
+| | AWSLambda | Lambda |
+| | AmazonECS | ECS |
+| 数据库 | AmazonRDS | RDS |
+| | AmazonDynamoDB | DynamoDB |
+| | AmazonElastiCache | ElastiCache |
+| 存储 | AmazonS3 | S3 |
+| | AmazonEBS | EBS |
+| | AmazonEFS | EFS |
+| 网络 | AmazonVPC | VPC |
+| | AmazonCloudFront | CloudFront |
+| | ElasticLoadBalancing | ELB |
+
+完整服务列表见 [references/service-catalog.md](references/service-catalog.md)。
+
+## 项目结构
 
 ```
 aws-china-pricing/
-├── SKILL.md                    # OpenClaw skill entry point
-├── discount-config.yaml        # EDP/PPA discount configuration
+├── SKILL.md                    # OpenClaw Skill 入口
+├── discount-config.yaml        # EDP/PPA 折扣配置
 ├── scripts/
-│   ├── smart_import.py         # Natural language → AWS service mapping
-│   ├── query_price.py          # Core pricing query (API + cache fallback)
-│   ├── calculate_cost.py       # Batch cost calculation engine
-│   ├── update_prices.py        # Price data updater (Bulk API + indexing)
-│   ├── generate_quote.py       # Excel quote generator
-│   └── recommend_instance.py   # Instance type recommender
+│   ├── smart_import.py         # 智能导入（自然语言 → AWS 服务映射）
+│   ├── query_price.py          # 核心查价（API + 缓存降级）
+│   ├── calculate_cost.py       # 批量成本计算引擎
+│   ├── update_prices.py        # 价格数据更新（Bulk API + 索引）
+│   ├── generate_quote.py       # Excel 报价单生成
+│   └── recommend_instance.py   # 实例规格推荐
 ├── references/
-│   ├── discount-models.md      # EDP/PPA/RI/SP discount models
-│   ├── service-catalog.md      # China region service notes
-│   └── input-format.md         # CSV/Excel input format spec
-├── assets/                     # Template files
-└── data/                       # Price cache (auto-generated)
-    ├── cache/                  # Raw Bulk API downloads
-    └── index/                  # Indexed per-instance-family files
+│   ├── discount-models.md      # EDP/PPA/RI/SP 折扣模型详解
+│   ├── service-catalog.md      # 中国区服务特殊说明
+│   └── input-format.md         # CSV/Excel 输入格式规范
+├── assets/                     # 模板文件
+└── data/                       # 价格缓存（自动生成）
+    ├── cache/                  # Bulk API 原始下载
+    └── index/                  # 按实例族索引的小文件
 ```
 
-## Regions Covered
+## 覆盖区域
 
-| Region Code | Name | Operator |
-|-------------|------|----------|
-| cn-north-1 | Beijing | Sinnet (光环新网) |
-| cn-northwest-1 | Ningxia | NWCD (西云数据) |
+| 区域代码 | 名称 | 运营方 |
+|----------|------|--------|
+| cn-north-1 | 北京区 | 光环新网 (Sinnet) |
+| cn-northwest-1 | 宁夏区 | 西云数据 (NWCD) |
 | cn-north-1-pkx-1 | Auto Cloud Local Zone | — |
 
-## License
+## 版本历史
+
+### v1.7.3 (最新)
+- ✅ 30 种计费模式支持，智能适用性判断
+- ✅ EBS 独立服务，gp3 默认卷类型
+- ✅ S3 七种存储类别智能检测
+- ✅ 存储服务统一 per-GB-month 计费
+- ✅ 按量计费服务标注和默认用量
+- ✅ EDP 折扣显示在报价单头部
+- ✅ 87 个服务统一显示名规范
+- ✅ 自动使用 AWS CLI 默认 profile
+
+### v1.5.4
+- ✅ 基础价格查询和 RI/SP 支持
+- ✅ 智能导入和 Excel 报价单生成
+- ✅ EDP/PPA 折扣配置
+
+## 许可证
 
 MIT
