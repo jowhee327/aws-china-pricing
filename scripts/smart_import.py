@@ -35,6 +35,11 @@ from pathlib import Path
 # ── 服务映射表（增强版）────────────────────────────────────────────────────
 # 每条规则: (关键词列表, ServiceCode, 附加字段 dict)
 # 关键词全部小写，匹配时也先 lower()
+# EC2/RDS/ElastiCache 实例类型正则（识别裸实例名如 m5.large, db.r6g.xlarge, cache.r7g.large）
+EC2_INSTANCE_RE = re.compile(
+    r"^(db\.|cache\.)?[a-z]\d+[a-z]*[gdens]*\.(nano|micro|small|medium|large|xlarge|\d+xlarge|metal)$", re.I
+)
+
 SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     # ── 存储类（优先匹配，避免与计算类关键词冲突）──
     (["ebs", "块存储", "弹性块存储", "弹性块", "ssd存储", "通用ssd", "通用SSD",
@@ -408,7 +413,7 @@ COLUMN_ROLE_KEYWORDS = {
                      "服务", "产品", "资源", "component", "product",
                      "类别", "category", "item"],
     "spec": ["配置", "规格", "详情", "spec", "configuration", "config", "名称",
-             "实例规格", "实例类型", "instance", "instance_type", "型号"],
+             "实例规格", "实例类型", "instance", "instance_type", "instance type", "型号"],
     "quantity": ["数量", "个数", "台数", "count", "quantity", "num",
                  "用量", "最低个数", "节点数", "台", "个"],
     "unit": ["单位", "unit"],
@@ -955,12 +960,27 @@ def build_item(row_values: list, column_roles: dict[int, str],
     original_request = " | ".join(original_parts)
 
     # ── 服务匹配 ──
+    _detected_instance_type = ""
     service_code, extra_fields, warning, _ = match_service_smart(service_text)
     if not service_code:
         service_code, extra_fields, warning, _ = match_service_smart(all_text)
 
     if not service_code:
-        # 最终 fallback: 有规格信息则视为 EC2 应用服务
+        # 最终 fallback 1: 检测裸 EC2/RDS/ElastiCache 实例类型名（如 m5.large, db.r6g.xlarge）
+        for check_text in [spec_text, service_text]:
+            check_clean = check_text.strip()
+            if check_clean and EC2_INSTANCE_RE.match(check_clean):
+                if check_clean.lower().startswith("db."):
+                    service_code = "AmazonRDS"
+                elif check_clean.lower().startswith("cache."):
+                    service_code = "AmazonElastiCache"
+                else:
+                    service_code = "AmazonEC2"
+                _detected_instance_type = check_clean
+                break
+
+    if not service_code:
+        # 最终 fallback 2: 有规格信息则视为 EC2 应用服务
         fallback_spec_text = " ".join(filter(None, [spec_text, quantity_text]))
         fallback_spec = extract_spec(fallback_spec_text)
         if fallback_spec.get("vcpu") or fallback_spec.get("memory"):
@@ -1084,7 +1104,7 @@ def build_item(row_values: list, column_roles: dict[int, str],
     result = {
         "sheet_name": sheet_name,
         "service": service_code,
-        "instance_type": "",
+        "instance_type": _detected_instance_type,
         "region": region,
         "quantity": str(qty),
         "usage_hours": usage_hours_value,
