@@ -213,6 +213,53 @@ ENGINE_HINTS = {
 }
 
 # ── Extended Support 相关 ─────────────────────────────────────────────────
+
+# RDS engine 名称规范化（查价 usagetype 要求精确大小写）
+_RDS_ENGINE_ALIASES = {
+    "postgresql": "PostgreSQL", "postgres": "PostgreSQL",
+    "psql": "PostgreSQL", "pgsql": "PostgreSQL", "pg": "PostgreSQL",
+    "mysql": "MySQL",
+    "aurora mysql": "Aurora MySQL", "aurora-mysql": "Aurora MySQL",
+    "auroramysql": "Aurora MySQL",
+    "aurora postgresql": "Aurora PostgreSQL",
+    "aurora-postgresql": "Aurora PostgreSQL",
+    "aurora postgres": "Aurora PostgreSQL",
+    "aurora-postgres": "Aurora PostgreSQL",
+    "aurorapostgresql": "Aurora PostgreSQL",
+    "mariadb": "MariaDB",
+    "oracle": "Oracle",
+    "sql server": "SQL Server", "sqlserver": "SQL Server", "mssql": "SQL Server",
+}
+
+
+def normalize_rds_engine(engine: str) -> str:
+    """将任意大小写/别名的 engine 规范化为 ES 查价要求的大小写。
+
+    未识别或为空 → 原样返回 (strip 后)。
+    """
+    if not engine:
+        return ""
+    key = engine.strip().lower()
+    if not key:
+        return ""
+    return _RDS_ENGINE_ALIASES.get(key, engine.strip())
+
+
+def infer_engine_from_version(engine_version: str) -> str:
+    """engine 为空但有 engine_version 时，尝试从版本推断 engine。
+
+    返回 "" 表示无法推断。
+    """
+    if not engine_version:
+        return ""
+    v = engine_version.strip()
+    if v in ("10", "11", "12", "13", "14", "15", "16"):
+        return "PostgreSQL"
+    if v in ("5.6", "5.7", "8.0"):
+        return "MySQL"
+    return ""
+
+
 # 引擎版本检测：(匹配模式正则, engine, engine_version)
 # 匹配 "MySQL 5.7", "mysql5.7", "PostgreSQL 11", "Aurora MySQL 2", "Aurora PG 12" 等
 EXTENDED_SUPPORT_ENGINE_VERSIONS = [
@@ -232,7 +279,8 @@ EXTENDED_SUPPORT_KEYWORDS = [
 
 # Yr3 档位关键词（第3年往往另计价）
 EXTENDED_SUPPORT_YR3_KEYWORDS = [
-    "yr3", "yr-3", "year 3", "年3", "第3年", "第三年", "3年延长支持", "3年扩展支持",
+    "yr3", "yr-3", "yr 3", "year3", "year-3", "year 3",
+    "年3", "第3年", "第 3 年", "第三年", "3年延长支持", "3年扩展支持",
 ]
 
 
@@ -248,21 +296,37 @@ def detect_engine_version(text: str) -> tuple[str, str]:
     return "", ""
 
 
-def detect_extended_support(text: str) -> str:
+def detect_deployment_option(text: str) -> str:
+    """从文本检测 RDS 部署模式，返回 'Multi-AZ'、'Single-AZ' 或 ''。"""
+    if not text:
+        return ""
+    text_lower = text.lower()
+    multi_keywords = ["multi-az", "multiaz", "multi az", "多可用区", "多az", "双az", "双可用区"]
+    if any(kw in text_lower for kw in multi_keywords):
+        return "Multi-AZ"
+    single_keywords = ["single-az", "singleaz", "single az", "单可用区", "单az"]
+    if any(kw in text_lower for kw in single_keywords):
+        return "Single-AZ"
+    return ""
+
+
+def detect_extended_support(text: str, loose: bool = False) -> str:
     """从文本检测 extended_support 字段。返回 '', 'yr1-2' 或 'yr3'。
 
     规则：
     - 文本包含 ES 关键词 → 默认 yr1-2
     - 如同时出现 Yr3 关键词 → yr3
+    - loose=True: 已知上下文是 EKS/RDS，独立的 ES/Ext token 即可识别
     """
     if not text:
         return ""
     text_lower = text.lower()
     has_es = any(kw in text_lower for kw in EXTENDED_SUPPORT_KEYWORDS)
     has_es_abbrev = bool(re.search(r'\b(es|ext)\b', text_lower))
-    # 缩写 ES/EXT 仅在上下文中含 support/延长/扩展 才算
     if has_es_abbrev and not has_es:
-        if any(k in text_lower for k in ["support", "延长", "扩展"]):
+        if loose:
+            has_es = True
+        elif any(k in text_lower for k in ["support", "延长", "扩展"]):
             has_es = True
     if not has_es:
         return ""
@@ -516,6 +580,8 @@ COLUMN_ALIASES = {
     "storage_gb": "storage_gb", "存储": "storage_gb",
     "billing_mode": "billing_mode", "计费模式": "billing_mode",
     "usage_hours": "usage_hours", "使用时长": "usage_hours",
+    "deployment_option": "deployment_option", "部署模式": "deployment_option",
+    "部署选项": "deployment_option", "deployment": "deployment_option",
 }
 
 # 标准输出列
@@ -1157,10 +1223,12 @@ def build_item(row_values: list, column_roles: dict[int, str],
     es_text = " ".join(filter(None, [
         service_text, spec_text, description_text, business_text
     ]))
+    deployment_option = ""
     if service_code in ("AmazonEKS", "AmazonRDS"):
-        extended_support = detect_extended_support(es_text)
+        extended_support = detect_extended_support(es_text, loose=True)
 
         if service_code == "AmazonRDS":
+            deployment_option = detect_deployment_option(es_text)
             detected_engine, detected_version = detect_engine_version(es_text)
             if detected_engine:
                 engine_version = detected_version
@@ -1173,6 +1241,18 @@ def build_item(row_values: list, column_roles: dict[int, str],
                         f"⚠️ 检测到旧版本 {detected_engine} {detected_version}，"
                         "可能需要 Extended Support 附加费用（extended_support=yr1-2 或 yr3）"
                     )
+
+            # engine 规范化（确保大小写匹配 ES usagetype 映射）
+            normalized = normalize_rds_engine(engine)
+            if normalized:
+                engine = normalized
+            elif not engine and engine_version:
+                inferred = infer_engine_from_version(engine_version)
+                if inferred:
+                    engine = inferred
+                elif extended_support:
+                    print(f"[WARN] 无法从 engine_version '{engine_version}' 推断 RDS engine，"
+                          f"Extended Support 查价可能失败", file=sys.stderr)
 
     # 设置 usage_hours 值
     usage_hours_value = "720"  # 默认值
@@ -1212,6 +1292,7 @@ def build_item(row_values: list, column_roles: dict[int, str],
         "engine_version": engine_version,
         "storage_gb": str(spec_info["storage_gb"]) if spec_info.get("storage_gb") else "",
         "billing_mode": item_billing_mode,
+        "deployment_option": deployment_option,
         "extended_support": extended_support,
         "notes": "; ".join(notes_parts) if notes_parts else "",
         "original_request": original_request,
@@ -1331,6 +1412,12 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
     """处理 CSV 单行，返回标准化条目（兼容旧格式）"""
     norm = normalize_columns(row)
 
+    # 跳过合计/汇总行（与 build_item 路径保持一致）
+    _summary_keywords = {"total", "合计", "小计", "汇总", "subtotal", "sum"}
+    for _v in norm.values():
+        if _v and str(_v).lower().strip() in _summary_keywords:
+            return None
+
     orig_svc = norm.get("service", "")
     orig_spec = norm.get("spec", "")
     original_request = " ".join(filter(None, [orig_svc, orig_spec])).strip()
@@ -1405,18 +1492,34 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         else:
             es_value = ""
         if not es_value and orig_svc in ("AmazonEKS", "AmazonRDS"):
-            es_value = detect_extended_support(es_text_csv)
+            es_value = detect_extended_support(es_text_csv, loose=True)
 
         engine_version_csv = norm.get("engine_version", "")
+        engine_csv = norm.get("engine", "")
+        deployment_option_csv = (norm.get("deployment_option", "") or "").strip()
+        if orig_svc == "AmazonRDS" and not deployment_option_csv:
+            deployment_option_csv = detect_deployment_option(es_text_csv)
         if orig_svc == "AmazonRDS":
             if not engine_version_csv:
                 det_engine, det_version = detect_engine_version(es_text_csv)
                 if det_engine:
                     engine_version_csv = det_version
+                    if not engine_csv:
+                        engine_csv = det_engine
+            # engine 规范化（大小写/别名）
+            normalized = normalize_rds_engine(engine_csv)
+            if normalized:
+                engine_csv = normalized
+            elif not engine_csv and engine_version_csv:
+                inferred = infer_engine_from_version(engine_version_csv)
+                if inferred:
+                    engine_csv = inferred
+                elif es_value:
+                    print(f"[WARN] 无法从 engine_version '{engine_version_csv}' 推断 RDS engine，"
+                          f"Extended Support 查价可能失败", file=sys.stderr)
             if not es_value and engine_version_csv:
-                eng = norm.get("engine", "")
-                if (eng, engine_version_csv) in LEGACY_ENGINE_VERSIONS:
-                    warn = (f"⚠️ 检测到旧版本 {eng} {engine_version_csv}，"
+                if (engine_csv, engine_version_csv) in LEGACY_ENGINE_VERSIONS:
+                    warn = (f"⚠️ 检测到旧版本 {engine_csv} {engine_version_csv}，"
                             "可能需要 Extended Support 附加费用")
                     notes_value = f"{warn}; {notes_value}" if notes_value else warn
 
@@ -1428,10 +1531,11 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
             "quantity": norm.get("quantity", "1") or "1",
             "usage_hours": usage_hours_value,
             "os": norm.get("os", ""),
-            "engine": norm.get("engine", ""),
+            "engine": engine_csv,
             "engine_version": engine_version_csv,
             "storage_gb": norm.get("storage_gb", ""),
             "billing_mode": norm.get("billing_mode", item_billing_mode),
+            "deployment_option": deployment_option_csv,
             "extended_support": es_value,
             "notes": notes_value,
             "original_request": original_request,
@@ -1530,10 +1634,13 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
     else:
         es_value2 = ""
     if not es_value2 and service_code in ("AmazonEKS", "AmazonRDS"):
-        es_value2 = detect_extended_support(es_text_csv2)
+        es_value2 = detect_extended_support(es_text_csv2, loose=True)
 
     engine_version_csv2 = norm.get("engine_version", "")
     detected_engine2 = ""
+    deployment_option_csv2 = (norm.get("deployment_option", "") or "").strip()
+    if service_code == "AmazonRDS" and not deployment_option_csv2:
+        deployment_option_csv2 = detect_deployment_option(es_text_csv2)
     if service_code == "AmazonRDS":
         det_engine, det_version = detect_engine_version(es_text_csv2)
         if det_engine:
@@ -1542,13 +1649,24 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
                 engine_version_csv2 = det_version
         if not es_value2 and engine_version_csv2:
             eng_check = norm.get("engine", "") or engine_info.get("engine", "") or detected_engine2
-            if (eng_check, engine_version_csv2) in LEGACY_ENGINE_VERSIONS:
+            if (normalize_rds_engine(eng_check), engine_version_csv2) in LEGACY_ENGINE_VERSIONS:
                 warn = (f"⚠️ 检测到旧版本 {eng_check} {engine_version_csv2}，"
                         "可能需要 Extended Support 附加费用")
                 csv_notes = f"{warn}; {csv_notes}" if csv_notes else warn
 
     final_engine = (norm.get("engine", "") or engine_info.get("engine", "")
                     or detected_engine2)
+    if service_code == "AmazonRDS":
+        normalized = normalize_rds_engine(final_engine)
+        if normalized:
+            final_engine = normalized
+        elif not final_engine and engine_version_csv2:
+            inferred = infer_engine_from_version(engine_version_csv2)
+            if inferred:
+                final_engine = inferred
+            elif es_value2:
+                print(f"[WARN] 无法从 engine_version '{engine_version_csv2}' 推断 RDS engine，"
+                      f"Extended Support 查价可能失败", file=sys.stderr)
 
     result = {
         "sheet_name": "",
@@ -1562,6 +1680,7 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         "engine_version": engine_version_csv2,
         "storage_gb": norm.get("storage_gb", ""),
         "billing_mode": norm.get("billing_mode", item_billing_mode),
+        "deployment_option": deployment_option_csv2,
         "extended_support": es_value2,
         "notes": csv_notes,
         "original_request": original_request,

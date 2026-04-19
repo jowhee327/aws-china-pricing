@@ -32,6 +32,61 @@ from query_price import (
     query_extended_support_price,
 )
 
+# RDS engine 别名 → 规范化大小写（与 smart_import.py 保持一致）
+_RDS_ENGINE_ALIASES = {
+    "postgresql": "PostgreSQL", "postgres": "PostgreSQL",
+    "psql": "PostgreSQL", "pgsql": "PostgreSQL", "pg": "PostgreSQL",
+    "mysql": "MySQL",
+    "aurora mysql": "Aurora MySQL", "aurora-mysql": "Aurora MySQL",
+    "auroramysql": "Aurora MySQL",
+    "aurora postgresql": "Aurora PostgreSQL",
+    "aurora-postgresql": "Aurora PostgreSQL",
+    "aurora postgres": "Aurora PostgreSQL",
+    "aurora-postgres": "Aurora PostgreSQL",
+    "aurorapostgresql": "Aurora PostgreSQL",
+    "mariadb": "MariaDB",
+    "oracle": "Oracle",
+    "sql server": "SQL Server", "sqlserver": "SQL Server", "mssql": "SQL Server",
+}
+
+
+def _normalize_rds_engine(engine: str) -> str:
+    if not engine:
+        return ""
+    key = engine.strip().lower()
+    if not key:
+        return ""
+    return _RDS_ENGINE_ALIASES.get(key, engine.strip())
+
+
+# 从 instance_type 名称推断 vCPU（fallback，当 pricing API 缺 vcpu 属性时使用）
+# 规则: {family}.{size}，size 对应 vCPU：large=2, xlarge=4, NxLarge=N*4
+_SIZE_VCPU_MAP = {
+    "nano": 1, "micro": 1, "small": 1, "medium": 2,
+    "large": 2, "xlarge": 4,
+}
+
+
+def _vcpu_from_instance_type(instance_type: str) -> int:
+    """从实例类型字符串推断 vCPU 数。失败返回 0。"""
+    if not instance_type:
+        return 0
+    # db.r6g.2xlarge / r6g.xlarge / cache.m5.large
+    parts = instance_type.split(".")
+    if len(parts) < 2:
+        return 0
+    size = parts[-1].lower()
+    if size in _SIZE_VCPU_MAP:
+        return _SIZE_VCPU_MAP[size]
+    # NxLarge 形式
+    import re as _re
+    m = _re.match(r"^(\d+)xlarge$", size)
+    if m:
+        return int(m.group(1)) * 4
+    if size == "metal":
+        return 0
+    return 0
+
 
 def load_discount_config(config_path: str) -> dict:
     """加载折扣配置"""
@@ -190,6 +245,13 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
         else:
             user_filters["databaseEngine"] = item["engine"]
 
+    # RDS: 部署模式过滤器，默认 Single-AZ（避免查到 Multi-AZ 价格两倍）
+    if service == "AmazonRDS":
+        deployment_option = (item.get("deployment_option") or "").strip()
+        if not deployment_option:
+            deployment_option = "Single-AZ"
+        user_filters["deploymentOption"] = deployment_option
+
     # S3 存储类别过滤器（AWS Pricing API 中 S3 用 volumeType 字段表示存储类别）
     if service == "AmazonS3" and item.get("storageClass"):
         user_filters["volumeType"] = item["storageClass"]
@@ -281,8 +343,14 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
         "region": item.get("region", "cn-north-1"),
         "quantity": quantity,
         "usage_hours": usage_hours,
+        "engine": item.get("engine", ""),
+        "engine_version": item.get("engine_version", ""),
+        "os": item.get("os", ""),
         "storage_gb": item.get("storage_gb", ""),
         "productFamily": item.get("productFamily") or item.get("productfamily", ""),
+        "volumeApiName": item.get("volumeApiName") or item.get("volumeapiname", ""),
+        "storageClass": item.get("storageClass") or item.get("storageclass", ""),
+        "deployment_option": item.get("deployment_option", ""),
         "billing_mode": billing_mode,
         "notes": item.get("notes", ""),
         "original_request": item.get("original_request", ""),
@@ -343,6 +411,7 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
     es_hourly = 0.0
     es_usagetype = ""
     es_unit = ""
+    es_error = ""
     if es_mode in ("yr1-2", "yr3") and service in ("AmazonEKS", "AmazonRDS"):
         es_region = item.get("region", "cn-north-1")
         if service in REGION_OVERRIDE:
@@ -357,33 +426,49 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
                 # EKS: per cluster per hour
                 es_monthly_per_unit = es_hourly * usage_hours
                 es_monthly_total = es_monthly_per_unit * quantity
+            else:
+                es_error = f"price not found ({es_usagetype})"
         elif service == "AmazonRDS":
-            engine = item.get("engine", "")
-            engine_version = item.get("engine_version", "")
-            es_usagetype = build_rds_extended_support_usagetype(
-                es_region, es_mode, engine, engine_version
-            )
-            if es_usagetype:
-                es_data = query_extended_support_price("AmazonRDS", es_region, es_usagetype)
-                if es_data:
-                    es_hourly = es_data["price"]
-                    es_unit = es_data.get("unit", "vCPU-hour")
-                    # RDS: per vCPU per hour
-                    vcpu_attr = price_data.get("attributes", {}).get("vcpu", "")
-                    try:
-                        vcpu = int(vcpu_attr) if vcpu_attr else 0
-                    except (ValueError, TypeError):
-                        vcpu = 0
-                    if vcpu > 0:
-                        es_monthly_per_unit = es_hourly * usage_hours * vcpu
-                        es_monthly_total = es_monthly_per_unit * quantity
+            engine = _normalize_rds_engine(item.get("engine", ""))
+            engine_version = (item.get("engine_version") or "").strip()
+            if not engine:
+                es_error = "missing engine"
+            elif not engine_version:
+                es_error = "missing engine_version"
+            else:
+                es_usagetype = build_rds_extended_support_usagetype(
+                    es_region, es_mode, engine, engine_version
+                )
+                if not es_usagetype:
+                    es_error = f"unknown engine/version ({engine} {engine_version})"
+                else:
+                    es_data = query_extended_support_price("AmazonRDS", es_region, es_usagetype)
+                    if not es_data:
+                        es_error = f"price not found ({es_usagetype})"
                     else:
-                        print(f"[WARN] RDS Extended Support: 无法从价格数据获取 vCPU 数，"
-                              f"ES 附加费跳过 ({instance_type})", file=sys.stderr)
+                        es_hourly = es_data["price"]
+                        es_unit = es_data.get("unit", "vCPU-hour")
+                        # RDS: per vCPU per hour
+                        vcpu_attr = price_data.get("attributes", {}).get("vcpu", "")
+                        try:
+                            vcpu = int(vcpu_attr) if vcpu_attr else 0
+                        except (ValueError, TypeError):
+                            vcpu = 0
+                        if vcpu <= 0:
+                            vcpu = _vcpu_from_instance_type(instance_type)
+                        if vcpu > 0:
+                            es_monthly_per_unit = es_hourly * usage_hours * vcpu
+                            es_monthly_total = es_monthly_per_unit * quantity
+                        else:
+                            es_error = f"missing vcpu (instance_type={instance_type})"
 
         if es_monthly_total > 0 and include_tax:
             vat_rate = discount_config.get("tax", {}).get("vat_rate", 6) / 100
             es_monthly_total *= (1 + vat_rate)
+
+        if es_error:
+            print(f"[WARN] Extended Support 查价失败 ({service} {instance_type}): {es_error}",
+                  file=sys.stderr)
 
     result.update({
         "hourly_list": hourly,
@@ -400,6 +485,7 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
         "extended_support_unit": es_unit,
         "extended_support_monthly_total": round(es_monthly_total, 2),
         "extended_support_yearly_total": round(es_monthly_total * 12, 2),
+        "extended_support_error": es_error,
     })
 
     return result
@@ -493,8 +579,12 @@ def save_csv(results: list[dict], output_path: str):
         "sheet_name", "service", "instance_type", "region", "quantity", "usage_hours",
         "billing_mode", "currency", "hourly_list", "hourly_after_discount",
         "monthly_per_unit", "monthly_total", "upfront_total", "yearly_total",
+        "engine", "engine_version", "os", "storage_gb",
+        "productFamily", "volumeApiName", "storageClass",
+        "deployment_option",
         "extended_support", "extended_support_hourly", "extended_support_usagetype",
         "extended_support_monthly_total", "extended_support_yearly_total",
+        "extended_support_error",
         "applied_discounts", "notes", "original_request", "section", "warning",
     ]
 

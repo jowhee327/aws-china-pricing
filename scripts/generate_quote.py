@@ -339,6 +339,10 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
         non_edp_discounts = [d for d in applied_discounts if not d.startswith("EDP")]
         discounts_note = ", ".join(non_edp_discounts)
         notes = r.get("notes", "")
+        deployment_option = (r.get("deployment_option") or "").strip()
+        if deployment_option and r.get("service") == "AmazonRDS":
+            dep_note = f"部署模式: {deployment_option}"
+            notes = f"{notes}; {dep_note}" if notes else dep_note
         if discounts_note:
             notes = f"{notes} [{discounts_note}]" if notes else f"[{discounts_note}]"
 
@@ -414,6 +418,8 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
 
         # ── Extended Support 附加行 ──
         es_monthly = r.get("extended_support_monthly_total", 0) or 0
+        es_error = r.get("extended_support_error", "")
+        es_mode_raw = (r.get("extended_support") or "").strip().lower()
         if es_monthly > 0:
             es_row = current_row
             idx += 1
@@ -422,7 +428,6 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
             )
             es_service_name = f"{service_name} Extended Support ({es_mode_label})"
             es_hourly = r.get("extended_support_hourly", 0)
-            es_yearly = r.get("extended_support_yearly_total", es_monthly * 12)
             if include_tax:
                 es_hourly = round(es_hourly * 1.06, 6)
             es_unit_note = r.get("extended_support_unit", "")
@@ -430,24 +435,43 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
             if es_unit_note:
                 es_notes = f"{es_notes} | 单价单位: {es_unit_note}"
 
+            qty = int(r.get("quantity", 1) or 1)
+            # per-unit 月费 = es_monthly / quantity（避免 quantity>1 时 I 列等于合计）
+            es_monthly_per_unit = es_monthly / qty if qty else es_monthly
+
             es_values = [
                 idx,
                 es_service_name,
                 r.get("instance_type", ""),
                 region_name,
-                int(r.get("quantity", 1) or 1),
+                qty,
                 float(r.get("usage_hours", 720) or 720),
                 "按需 (附加费)",
                 float(es_hourly or 0),
-                float(es_monthly),
-                float(es_monthly),
-                float(es_yearly),
+                float(round(es_monthly_per_unit, 2)),  # I = per-unit
+                None,  # J = I × E (公式)
+                None,  # K = J × 12 (公式)
                 0,
                 es_notes,
                 "",
             ]
             write_data_row(ws, es_row, es_values, fmt)
+            # J = I × E, K = J × 12（与普通行公式一致）
+            cell_j = ws.cell(row=es_row, column=10)
+            cell_j.value = f"=I{es_row}*E{es_row}"
+            cell_j.number_format = CNY_FORMAT
+            cell_k = ws.cell(row=es_row, column=11)
+            cell_k.value = f"=J{es_row}*12"
+            cell_k.number_format = CNY_FORMAT
             current_row += 1
+        elif es_mode_raw in ("yr1-2", "yr3") and es_error:
+            # ES 请求但查价失败：不生成 ES 行，但在主行备注列标注
+            main_row = row_num
+            note_cell = ws.cell(row=main_row, column=13)
+            warn_msg = f"⚠️ ES 查价失败: {es_error}"
+            existing = note_cell.value or ""
+            note_cell.value = f"{existing}; {warn_msg}" if existing else warn_msg
+            note_cell.font = Font(name="微软雅黑", size=10, color="C00000")
 
     # 合计行用 SUM 公式
     total_row = current_row
