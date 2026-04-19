@@ -39,6 +39,46 @@ from pathlib import Path
 EC2_INSTANCE_RE = re.compile(
     r"^(db\.|cache\.)?[a-z]{1,3}\d+[a-z]*\.(nano|micro|small|medium|large|xlarge|\d+xlarge|metal)$", re.I
 )
+# OpenSearch 实例类型正则（如 r5.large.search, r5.large.elasticsearch）
+OPENSEARCH_INSTANCE_RE = re.compile(
+    r"^[a-z]{1,3}\d+[a-z]*\.(nano|micro|small|medium|large|xlarge|\d+xlarge)\.(search|elasticsearch)$",
+    re.I,
+)
+
+
+def is_opensearch_instance_type(text: str) -> bool:
+    """是否像 OpenSearch 实例类型（带 .search/.elasticsearch 后缀）。"""
+    if not text:
+        return False
+    return bool(OPENSEARCH_INSTANCE_RE.match(text.strip()))
+
+
+# OpenSearch: AWS 中国区 Pricing API 只认 .search 后缀
+# family.size 裸实例名正则（r5.large / m7g.xlarge 等，不含 db./cache. 前缀）
+_OPENSEARCH_BARE_RE = re.compile(
+    r"^[a-z]{1,3}\d+[a-z]*\.(nano|micro|small|medium|large|xlarge|\d+xlarge)$",
+    re.I,
+)
+
+
+def normalize_opensearch_instance_type(text: str) -> str:
+    """归一化 OpenSearch 实例类型以匹配 AWS 中国区 Pricing API 的 .search 后缀要求。
+
+    - r5.large.elasticsearch → r5.large.search
+    - r5.large              → r5.large.search (仅当匹配 family.size 裸实例名)
+    - r5.large.search       → 原样返回
+    - 其他                   → 原样返回
+    """
+    if not text:
+        return text
+    t = text.strip()
+    if t.lower().endswith(".elasticsearch"):
+        return t[: -len(".elasticsearch")] + ".search"
+    if t.lower().endswith(".search"):
+        return t
+    if _OPENSEARCH_BARE_RE.match(t):
+        return t + ".search"
+    return t
 
 SERVICE_RULES: list[tuple[list[str], str, dict]] = [
     # ── 存储类（优先匹配，避免与计算类关键词冲突）──
@@ -1132,6 +1172,28 @@ def build_item(row_values: list, column_roles: dict[int, str],
             service_code = service_text.strip() if service_text.strip() else "UNKNOWN"
             warning = ""
 
+    # service_code 已由 smart-match 命中时，仍需从 spec 字段提取实例类型
+    if not _detected_instance_type and service_code in (
+        "AmazonEC2", "AmazonRDS", "AmazonElastiCache", "AmazonES"
+    ):
+        for check_text in [spec_text, service_text]:
+            check_clean = check_text.strip()
+            if not check_clean:
+                continue
+            if service_code == "AmazonES":
+                if is_opensearch_instance_type(check_clean) \
+                        or _OPENSEARCH_BARE_RE.match(check_clean):
+                    _detected_instance_type = check_clean
+                    break
+            if service_code in ("AmazonEC2", "AmazonRDS", "AmazonElastiCache") \
+                    and EC2_INSTANCE_RE.match(check_clean):
+                _detected_instance_type = check_clean
+                break
+
+    # OpenSearch 实例类型归一化：AWS 中国区 Pricing API 只认 .search 后缀
+    if service_code == "AmazonES" and _detected_instance_type:
+        _detected_instance_type = normalize_opensearch_instance_type(_detected_instance_type)
+
     # ── 非标准服务检测 ──
     known_codes = {sc for _, sc, _ in SERVICE_RULES}
     is_non_standard_service = (service_code not in known_codes
@@ -1504,6 +1566,10 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         # ElastiCache ES 仅对 Redis 引擎生效
         if es_value and orig_svc == "AmazonElastiCache":
             _eng = (norm.get("engine") or "").lower()
+            if not _eng:
+                _detected = detect_engine(es_text_csv).get("cacheEngine", "").lower()
+                if _detected:
+                    _eng = _detected
             if _eng and _eng != "redis":
                 es_value = ""
 
@@ -1536,10 +1602,14 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
                             "可能需要 Extended Support 附加费用")
                     notes_value = f"{warn}; {notes_value}" if notes_value else warn
 
+        instance_type_csv = norm.get("instance_type", norm.get("spec", ""))
+        if orig_svc == "AmazonES" and instance_type_csv:
+            instance_type_csv = normalize_opensearch_instance_type(instance_type_csv)
+
         result = {
             "sheet_name": "",
             "service": orig_svc,
-            "instance_type": norm.get("instance_type", norm.get("spec", "")),
+            "instance_type": instance_type_csv,
             "region": norm.get("region", region),
             "quantity": norm.get("quantity", "1") or "1",
             "usage_hours": usage_hours_value,
@@ -1687,10 +1757,33 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
                 print(f"[WARN] 无法从 engine_version '{engine_version_csv2}' 推断 RDS engine，"
                       f"Extended Support 查价可能失败", file=sys.stderr)
 
+    # 从 spec 字段回退提取 instance_type（smart-match 不会自动填充）
+    csv_instance_type = norm.get("instance_type", "") or ""
+    if not csv_instance_type and service_code in (
+        "AmazonEC2", "AmazonRDS", "AmazonElastiCache", "AmazonES"
+    ):
+        for check_text in [spec_text, svc_text]:
+            check_clean = (check_text or "").strip()
+            if not check_clean:
+                continue
+            if service_code == "AmazonES":
+                if is_opensearch_instance_type(check_clean) \
+                        or _OPENSEARCH_BARE_RE.match(check_clean):
+                    csv_instance_type = check_clean
+                    break
+            if service_code in ("AmazonEC2", "AmazonRDS", "AmazonElastiCache") \
+                    and EC2_INSTANCE_RE.match(check_clean):
+                csv_instance_type = check_clean
+                break
+
+    # OpenSearch 实例类型归一化：AWS 中国区 Pricing API 只认 .search 后缀
+    if service_code == "AmazonES" and csv_instance_type:
+        csv_instance_type = normalize_opensearch_instance_type(csv_instance_type)
+
     result = {
         "sheet_name": "",
         "service": service_code,
-        "instance_type": norm.get("instance_type", ""),
+        "instance_type": csv_instance_type,
         "region": norm.get("region", region),
         "quantity": norm.get("quantity", "1") or "1",
         "usage_hours": usage_hours_value,
@@ -2110,6 +2203,7 @@ def _output_excel(items: list[dict], args):
     sys.path.insert(0, str(Path(__file__).parent))
     from calculate_cost import (
         load_discount_config, get_price_for_item, calculate_item_cost,
+        build_placeholder_result,
     )
     from generate_quote import generate_quote
 
@@ -2129,23 +2223,10 @@ def _output_excel(items: list[dict], args):
               file=sys.stderr)
         price_data = get_price_for_item(item, billing_mode=billing_mode)
         if not price_data:
-            results.append({
-                "service": item.get("service", ""),
-                "instance_type": item.get("instance_type", ""),
-                "region": item.get("region", ""),
-                "quantity": int(item.get("quantity", 1) or 1),
-                "usage_hours": float(item.get("usage_hours", 720) or 720),
-                "billing_mode": billing_mode,
-                "hourly_list": 0, "hourly_after_discount": 0,
-                "monthly_per_unit": 0, "monthly_total": 0,
-                "upfront_total": 0, "yearly_total": 0,
-                "applied_discounts": [],
-                "notes": item.get("notes", ""),
-                "original_request": item.get("original_request", ""),
-                "currency": "CNY",
-                "sheet_name": item.get("sheet_name", ""),
-                "section": item.get("section", ""),
-            })
+            placeholder = build_placeholder_result(
+                item, billing_mode, discount_config, args.include_tax
+            )
+            results.append(placeholder)
             continue
         cost = calculate_item_cost(item, price_data, discount_config, args.include_tax)
         results.append(cost)

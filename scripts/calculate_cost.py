@@ -329,6 +329,199 @@ def get_price_for_item(item: dict, billing_mode: str = "on-demand") -> Optional[
     return result
 
 
+def compute_extended_support(item: dict, price_data: Optional[dict],
+                             discount_config: dict,
+                             include_tax: bool = False) -> dict:
+    """计算单条目的 Extended Support 附加费用。
+
+    独立于主实例价格查询：即使 price_data 为 None（基础实例查价失败），
+    只要 service 支持 ES 且 extended_support 字段有效，仍返回 ES 费用。
+
+    返回字段: extended_support, extended_support_hourly, extended_support_usagetype,
+    extended_support_unit, extended_support_monthly_total, extended_support_yearly_total,
+    extended_support_error
+    """
+    service = item.get("service", "")
+    instance_type = item.get("instance_type", "")
+    quantity = int(item.get("quantity", 1) or 1)
+    usage_hours = float(item.get("usage_hours", 720) or 720)
+
+    es_mode = (item.get("extended_support") or "").strip().lower()
+    result = {
+        "extended_support": es_mode,
+        "extended_support_hourly": 0,
+        "extended_support_effective_hourly": 0,
+        "extended_support_usagetype": "",
+        "extended_support_unit": "",
+        "extended_support_monthly_total": 0.0,
+        "extended_support_yearly_total": 0.0,
+        "extended_support_error": "",
+    }
+
+    if es_mode not in ("yr1-2", "yr3") or service not in (
+        "AmazonEKS", "AmazonRDS", "AmazonElastiCache", "AmazonES"
+    ):
+        return result
+
+    es_region = item.get("region", "cn-north-1")
+    if service in REGION_OVERRIDE:
+        es_region = REGION_OVERRIDE[service]
+
+    es_hourly = 0.0  # 原始 per-unit 单价（vCPU-hr / NIH / cluster-hr / node-hr）
+    es_effective_hourly = 0.0  # 每台/节点/集群的"有效 per-hour"费率（乘上 vcpu/nih 后）
+    es_usagetype = ""
+    es_unit = ""
+    es_error = ""
+    es_monthly_total = 0.0
+
+    if service == "AmazonEKS":
+        es_usagetype = build_eks_extended_support_usagetype(es_region)
+        es_data = query_extended_support_price("AmazonEKS", es_region, es_usagetype)
+        if es_data:
+            es_hourly = es_data["price"]
+            es_unit = es_data.get("unit", "Hours")
+            es_effective_hourly = es_hourly  # per-cluster-hour
+            es_monthly_total = es_effective_hourly * usage_hours * quantity
+        else:
+            es_error = f"price not found ({es_usagetype})"
+    elif service == "AmazonRDS":
+        engine = _normalize_rds_engine(item.get("engine", ""))
+        engine_version = (item.get("engine_version") or "").strip()
+        if not engine:
+            es_error = "missing engine"
+        elif not engine_version:
+            es_error = "missing engine_version"
+        else:
+            es_usagetype = build_rds_extended_support_usagetype(
+                es_region, es_mode, engine, engine_version
+            )
+            if not es_usagetype:
+                es_error = f"unknown engine/version ({engine} {engine_version})"
+            else:
+                es_data = query_extended_support_price("AmazonRDS", es_region, es_usagetype)
+                if not es_data:
+                    es_error = f"price not found ({es_usagetype})"
+                else:
+                    es_hourly = es_data["price"]
+                    es_unit = es_data.get("unit", "vCPU-hour")
+                    vcpu_attr = ""
+                    if price_data:
+                        vcpu_attr = price_data.get("attributes", {}).get("vcpu", "")
+                    try:
+                        vcpu = int(vcpu_attr) if vcpu_attr else 0
+                    except (ValueError, TypeError):
+                        vcpu = 0
+                    if vcpu <= 0:
+                        vcpu = _vcpu_from_instance_type(instance_type)
+                    if vcpu > 0:
+                        es_effective_hourly = es_hourly * vcpu  # per-node-hour
+                        es_monthly_total = es_effective_hourly * usage_hours * quantity
+                    else:
+                        es_error = f"missing vcpu (instance_type={instance_type})"
+    elif service == "AmazonElastiCache":
+        engine = (item.get("engine") or "").strip()
+        if engine and engine.lower() != "redis":
+            es_error = f"engine not eligible ({engine})"
+        elif not instance_type:
+            es_error = "missing instance_type"
+        else:
+            es_usagetype = build_elasticache_extended_support_usagetype(
+                es_region, es_mode, instance_type
+            )
+            if not es_usagetype:
+                es_error = f"cannot build usagetype ({instance_type})"
+            else:
+                es_data = query_extended_support_price(
+                    "AmazonElastiCache", es_region, es_usagetype
+                )
+                if not es_data:
+                    es_error = f"price not found ({es_usagetype})"
+                else:
+                    es_hourly = es_data["price"]
+                    es_unit = es_data.get("unit", "Hrs")
+                    es_effective_hourly = es_hourly  # per-node-hour
+                    es_monthly_total = es_effective_hourly * usage_hours * quantity
+    elif service == "AmazonES":
+        if not instance_type:
+            es_error = "missing instance_type"
+        else:
+            nih_factor = opensearch_nih_factor(instance_type)
+            if nih_factor <= 0:
+                es_error = f"unknown instance size (instance_type={instance_type})"
+            else:
+                es_usagetype = build_opensearch_extended_support_usagetype(es_region)
+                es_data = query_extended_support_price("AmazonES", es_region, es_usagetype)
+                if not es_data:
+                    es_error = f"price not found ({es_usagetype})"
+                else:
+                    es_hourly = es_data["price"]
+                    es_unit = es_data.get("unit", "NIH")
+                    es_effective_hourly = es_hourly * nih_factor  # per-node-hour (NIH 归一化)
+                    es_monthly_total = es_effective_hourly * usage_hours * quantity
+
+    if es_monthly_total > 0 and include_tax:
+        vat_rate = discount_config.get("tax", {}).get("vat_rate", 6) / 100
+        es_monthly_total *= (1 + vat_rate)
+        # 注：es_effective_hourly 和 es_hourly 保持 pre-tax，
+        # 由 generate_quote 显示时再乘税率（与 hourly_after_discount 一致的模式）
+
+    if es_error:
+        print(f"[WARN] Extended Support 查价失败 ({service} {instance_type}): {es_error}",
+              file=sys.stderr)
+
+    result.update({
+        "extended_support_hourly": round(es_hourly, 6) if es_hourly else 0,
+        "extended_support_effective_hourly": round(es_effective_hourly, 6) if es_effective_hourly else 0,
+        "extended_support_usagetype": es_usagetype,
+        "extended_support_unit": es_unit,
+        "extended_support_monthly_total": round(es_monthly_total, 2),
+        "extended_support_yearly_total": round(es_monthly_total * 12, 2),
+        "extended_support_error": es_error,
+    })
+
+    return result
+
+
+def build_placeholder_result(item: dict, billing_mode: str,
+                             discount_config: dict,
+                             include_tax: bool = False) -> dict:
+    """基础实例查价失败时，构建占位行。若 item 请求 ES，仍计算 ES 附加费。"""
+    quantity = int(item.get("quantity", 1) or 1)
+    usage_hours = float(item.get("usage_hours", 720) or 720)
+    row = {
+        "service": item.get("service", ""),
+        "instance_type": item.get("instance_type", ""),
+        "region": item.get("region", ""),
+        "quantity": quantity,
+        "usage_hours": usage_hours,
+        "billing_mode": billing_mode,
+        "hourly_list": 0, "hourly_after_discount": 0,
+        "monthly_per_unit": 0, "monthly_total": 0,
+        "upfront_total": 0, "yearly_total": 0,
+        "applied_discounts": [],
+        "engine": item.get("engine", ""),
+        "engine_version": item.get("engine_version", ""),
+        "os": item.get("os", ""),
+        "storage_gb": item.get("storage_gb", ""),
+        "productFamily": item.get("productFamily") or item.get("productfamily", ""),
+        "volumeApiName": item.get("volumeApiName") or item.get("volumeapiname", ""),
+        "storageClass": item.get("storageClass") or item.get("storageclass", ""),
+        "deployment_option": item.get("deployment_option", ""),
+        "notes": item.get("notes", ""),
+        "original_request": item.get("original_request", ""),
+        "currency": "CNY",
+        "sheet_name": item.get("sheet_name", ""),
+        "section": item.get("section", ""),
+        "include_tax": include_tax,
+        "warning": "基础实例定价缺失",
+    }
+    es_result = compute_extended_support(item, None, discount_config, include_tax)
+    row.update(es_result)
+    if es_result.get("extended_support_monthly_total", 0) > 0:
+        row["warning"] = "基础实例定价缺失，ES 附加费仍已计算"
+    return row
+
+
 def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
                        include_tax: bool = False) -> dict:
     """计算单个条目的成本"""
@@ -408,117 +601,7 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
         upfront_total *= (1 + vat_rate)
 
     # ── Extended Support 附加费用 ──
-    es_mode = (item.get("extended_support") or "").strip().lower()
-    es_monthly_total = 0.0
-    es_hourly = 0.0
-    es_usagetype = ""
-    es_unit = ""
-    es_error = ""
-    if es_mode in ("yr1-2", "yr3") and service in (
-        "AmazonEKS", "AmazonRDS", "AmazonElastiCache", "AmazonES"
-    ):
-        es_region = item.get("region", "cn-north-1")
-        if service in REGION_OVERRIDE:
-            es_region = REGION_OVERRIDE[service]
-
-        if service == "AmazonEKS":
-            es_usagetype = build_eks_extended_support_usagetype(es_region)
-            es_data = query_extended_support_price("AmazonEKS", es_region, es_usagetype)
-            if es_data:
-                es_hourly = es_data["price"]
-                es_unit = es_data.get("unit", "Hours")
-                # EKS: per cluster per hour
-                es_monthly_per_unit = es_hourly * usage_hours
-                es_monthly_total = es_monthly_per_unit * quantity
-            else:
-                es_error = f"price not found ({es_usagetype})"
-        elif service == "AmazonRDS":
-            engine = _normalize_rds_engine(item.get("engine", ""))
-            engine_version = (item.get("engine_version") or "").strip()
-            if not engine:
-                es_error = "missing engine"
-            elif not engine_version:
-                es_error = "missing engine_version"
-            else:
-                es_usagetype = build_rds_extended_support_usagetype(
-                    es_region, es_mode, engine, engine_version
-                )
-                if not es_usagetype:
-                    es_error = f"unknown engine/version ({engine} {engine_version})"
-                else:
-                    es_data = query_extended_support_price("AmazonRDS", es_region, es_usagetype)
-                    if not es_data:
-                        es_error = f"price not found ({es_usagetype})"
-                    else:
-                        es_hourly = es_data["price"]
-                        es_unit = es_data.get("unit", "vCPU-hour")
-                        # RDS: per vCPU per hour
-                        vcpu_attr = price_data.get("attributes", {}).get("vcpu", "")
-                        try:
-                            vcpu = int(vcpu_attr) if vcpu_attr else 0
-                        except (ValueError, TypeError):
-                            vcpu = 0
-                        if vcpu <= 0:
-                            vcpu = _vcpu_from_instance_type(instance_type)
-                        if vcpu > 0:
-                            es_monthly_per_unit = es_hourly * usage_hours * vcpu
-                            es_monthly_total = es_monthly_per_unit * quantity
-                        else:
-                            es_error = f"missing vcpu (instance_type={instance_type})"
-        elif service == "AmazonElastiCache":
-            # ElastiCache Redis Extended Support：per-node-hour
-            engine = (item.get("engine") or "").strip()
-            if engine and engine.lower() != "redis":
-                es_error = f"engine not eligible ({engine})"
-            elif not instance_type:
-                es_error = "missing instance_type"
-            else:
-                es_usagetype = build_elasticache_extended_support_usagetype(
-                    es_region, es_mode, instance_type
-                )
-                if not es_usagetype:
-                    es_error = f"cannot build usagetype ({instance_type})"
-                else:
-                    es_data = query_extended_support_price(
-                        "AmazonElastiCache", es_region, es_usagetype
-                    )
-                    if not es_data:
-                        es_error = f"price not found ({es_usagetype})"
-                    else:
-                        es_hourly = es_data["price"]
-                        es_unit = es_data.get("unit", "Hrs")
-                        # ElastiCache: per-node per-hour
-                        es_monthly_per_unit = es_hourly * usage_hours
-                        es_monthly_total = es_monthly_per_unit * quantity
-        elif service == "AmazonES":
-            # OpenSearch Extended Support：flat SKU，按 NIH 归一化
-            if not instance_type:
-                es_error = "missing instance_type"
-            else:
-                nih_factor = opensearch_nih_factor(instance_type)
-                if nih_factor <= 0:
-                    es_error = f"unknown instance size (instance_type={instance_type})"
-                else:
-                    es_usagetype = build_opensearch_extended_support_usagetype(es_region)
-                    es_data = query_extended_support_price(
-                        "AmazonES", es_region, es_usagetype
-                    )
-                    if not es_data:
-                        es_error = f"price not found ({es_usagetype})"
-                    else:
-                        es_hourly = es_data["price"]
-                        es_unit = es_data.get("unit", "NIH")
-                        # OpenSearch: price_per_nih × nih_factor × hours
-                        es_monthly_per_unit = es_hourly * nih_factor * usage_hours
-                        es_monthly_total = es_monthly_per_unit * quantity
-
-        if es_monthly_total > 0 and include_tax:
-            vat_rate = discount_config.get("tax", {}).get("vat_rate", 6) / 100
-            es_monthly_total *= (1 + vat_rate)
-
-        if es_error:
-            print(f"[WARN] Extended Support 查价失败 ({service} {instance_type}): {es_error}",
-                  file=sys.stderr)
+    es_result = compute_extended_support(item, price_data, discount_config, include_tax)
 
     result.update({
         "hourly_list": hourly,
@@ -529,14 +612,8 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
         "yearly_total": round(monthly_total * 12, 2),
         "applied_discounts": applied_discounts,
         "include_tax": include_tax,
-        "extended_support": es_mode,
-        "extended_support_hourly": round(es_hourly, 6) if es_hourly else 0,
-        "extended_support_usagetype": es_usagetype,
-        "extended_support_unit": es_unit,
-        "extended_support_monthly_total": round(es_monthly_total, 2),
-        "extended_support_yearly_total": round(es_monthly_total * 12, 2),
-        "extended_support_error": es_error,
     })
+    result.update(es_result)
 
     return result
 
@@ -860,23 +937,11 @@ def main():
         print(f"  查询 {item.get('service', '')} {item.get('instance_type', '')} ...", file=sys.stderr)
         price_data = get_price_for_item(item, billing_mode=billing_mode)
         if not price_data:
-            results.append({
-                "service": item.get("service", ""),
-                "instance_type": item.get("instance_type", ""),
-                "region": item.get("region", ""),
-                "quantity": int(item.get("quantity", 1) or 1),
-                "billing_mode": billing_mode,
-                "hourly_list": 0, "hourly_after_discount": 0,
-                "monthly_per_unit": 0, "monthly_total": 0,
-                "upfront_total": 0, "yearly_total": 0,
-                "applied_discounts": [],
-                "notes": item.get("notes", ""),
-                "original_request": item.get("original_request", ""),
-                "currency": "CNY",
-                "sheet_name": item.get("sheet_name", ""),
-                "section": item.get("section", ""),
-            })
-            all_results.append(results[-1])
+            placeholder = build_placeholder_result(
+                item, billing_mode, discount_config, args.include_tax
+            )
+            results.append(placeholder)
+            all_results.append(placeholder)
             continue
 
         cost = calculate_item_cost(item, price_data, discount_config, args.include_tax)

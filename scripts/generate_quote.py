@@ -34,7 +34,7 @@ SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from calculate_cost import (
     load_workload, load_discount_config, get_price_for_item,
-    calculate_item_cost,
+    calculate_item_cost, build_placeholder_result,
 )
 
 # 样式定义
@@ -427,17 +427,26 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
                 r.get("extended_support", ""), r.get("extended_support", "")
             )
             es_service_name = f"{service_name} Extended Support ({es_mode_label})"
-            es_hourly = r.get("extended_support_hourly", 0)
+            # H 列使用"有效 per-unit hourly"费率（RDS 已乘 vCPU，OpenSearch 已乘 NIH）
+            # 这样 I = H × F 成立，E/F 修改时 I/J/K 能联动
+            es_effective_hourly = r.get("extended_support_effective_hourly", 0) or 0
+            if not es_effective_hourly:
+                # fallback: 从合计反推（旧缓存兼容，此时 es_monthly 可能已含税）
+                qty_tmp = int(r.get("quantity", 1) or 1)
+                usage_tmp = float(r.get("usage_hours", 720) or 720)
+                denom = qty_tmp * usage_tmp
+                if denom:
+                    es_effective_hourly = es_monthly / denom
+            es_raw_hourly = r.get("extended_support_hourly", 0)
             if include_tax:
-                es_hourly = round(es_hourly * 1.06, 6)
+                es_effective_hourly = round(es_effective_hourly * 1.06, 6)
+                es_raw_hourly = round(es_raw_hourly * 1.06, 6)
             es_unit_note = r.get("extended_support_unit", "")
             es_notes = r.get("extended_support_usagetype", "")
             if es_unit_note:
-                es_notes = f"{es_notes} | 单价单位: {es_unit_note}"
+                es_notes = f"{es_notes} | 原始单价: {es_raw_hourly:.6f}/{es_unit_note}"
 
             qty = int(r.get("quantity", 1) or 1)
-            # per-unit 月费 = es_monthly / quantity（避免 quantity>1 时 I 列等于合计）
-            es_monthly_per_unit = es_monthly / qty if qty else es_monthly
 
             es_values = [
                 idx,
@@ -447,8 +456,8 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
                 qty,
                 float(r.get("usage_hours", 720) or 720),
                 "按需 (附加费)",
-                float(es_hourly or 0),
-                float(round(es_monthly_per_unit, 2)),  # I = per-unit
+                float(round(es_effective_hourly, 6)),  # H = 有效 per-unit hourly
+                None,  # I = H × F (公式)
                 None,  # J = I × E (公式)
                 None,  # K = J × 12 (公式)
                 0,
@@ -456,7 +465,11 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
                 "",
             ]
             write_data_row(ws, es_row, es_values, fmt)
-            # J = I × E, K = J × 12（与普通行公式一致）
+            # I = H × F（有效 per-unit hourly × 使用时长）
+            cell_i = ws.cell(row=es_row, column=9)
+            cell_i.value = f"=H{es_row}*F{es_row}"
+            cell_i.number_format = CNY_FORMAT
+            # J = I × E, K = J × 12
             cell_j = ws.cell(row=es_row, column=10)
             cell_j.value = f"=I{es_row}*E{es_row}"
             cell_j.number_format = CNY_FORMAT
@@ -588,23 +601,10 @@ def main():
         print(f"  查询 {item.get('service', '')} {item.get('instance_type', '')} ...", file=sys.stderr)
         price_data = get_price_for_item(item, billing_mode=billing_mode)
         if not price_data:
-            results.append({
-                "service": item.get("service", ""),
-                "instance_type": item.get("instance_type", ""),
-                "region": item.get("region", ""),
-                "quantity": int(item.get("quantity", 1) or 1),
-                "usage_hours": float(item.get("usage_hours", 720) or 720),
-                "billing_mode": billing_mode,
-                "hourly_list": 0, "hourly_after_discount": 0,
-                "monthly_per_unit": 0, "monthly_total": 0,
-                "upfront_total": 0, "yearly_total": 0,
-                "applied_discounts": [],
-                "notes": item.get("notes", ""),
-                "original_request": item.get("original_request", ""),
-                "currency": "CNY",
-                "sheet_name": item.get("sheet_name", ""),
-                "section": item.get("section", ""),
-            })
+            placeholder = build_placeholder_result(
+                item, billing_mode, discount_config, args.include_tax
+            )
+            results.append(placeholder)
             continue
         cost = calculate_item_cost(item, price_data, discount_config, args.include_tax)
         results.append(cost)
