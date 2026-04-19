@@ -1217,15 +1217,22 @@ def build_item(row_values: list, column_roles: dict[int, str],
               or engine_info.get("cacheEngine", "")
               or extra_fields.get("engine", ""))
 
-    # ── Extended Support 检测 (仅 EKS/RDS) ──
+    # ── Extended Support 检测 (EKS/RDS/ElastiCache/OpenSearch) ──
     extended_support = ""
     engine_version = ""
     es_text = " ".join(filter(None, [
         service_text, spec_text, description_text, business_text
     ]))
     deployment_option = ""
-    if service_code in ("AmazonEKS", "AmazonRDS"):
+    if service_code in ("AmazonEKS", "AmazonRDS", "AmazonElastiCache", "AmazonES"):
         extended_support = detect_extended_support(es_text, loose=True)
+
+        # ElastiCache ES 仅对 Redis 引擎生效
+        if service_code == "AmazonElastiCache" and extended_support:
+            _ec_engine = (engine_info.get("cacheEngine") or engine
+                          or extra_fields.get("engine", "")).lower()
+            if _ec_engine and _ec_engine != "redis":
+                extended_support = ""
 
         if service_code == "AmazonRDS":
             deployment_option = detect_deployment_option(es_text)
@@ -1491,8 +1498,14 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
             es_value = "yr3"
         else:
             es_value = ""
-        if not es_value and orig_svc in ("AmazonEKS", "AmazonRDS"):
+        if not es_value and orig_svc in ("AmazonEKS", "AmazonRDS",
+                                          "AmazonElastiCache", "AmazonES"):
             es_value = detect_extended_support(es_text_csv, loose=True)
+        # ElastiCache ES 仅对 Redis 引擎生效
+        if es_value and orig_svc == "AmazonElastiCache":
+            _eng = (norm.get("engine") or "").lower()
+            if _eng and _eng != "redis":
+                es_value = ""
 
         engine_version_csv = norm.get("engine_version", "")
         engine_csv = norm.get("engine", "")
@@ -1633,8 +1646,14 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         es_value2 = "yr3"
     else:
         es_value2 = ""
-    if not es_value2 and service_code in ("AmazonEKS", "AmazonRDS"):
+    if not es_value2 and service_code in ("AmazonEKS", "AmazonRDS",
+                                          "AmazonElastiCache", "AmazonES"):
         es_value2 = detect_extended_support(es_text_csv2, loose=True)
+    # ElastiCache ES 仅对 Redis 引擎生效
+    if es_value2 and service_code == "AmazonElastiCache":
+        _eng2 = (norm.get("engine") or engine_info.get("cacheEngine", "") or "").lower()
+        if _eng2 and _eng2 != "redis":
+            es_value2 = ""
 
     engine_version_csv2 = norm.get("engine_version", "")
     detected_engine2 = ""

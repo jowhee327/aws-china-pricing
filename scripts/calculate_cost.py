@@ -29,6 +29,8 @@ from query_price import (
     query_api, query_cache, extract_pricing,
     RI_TERM_MAP, SP_TERM_MAP, REGION_OVERRIDE, query_savings_plans,
     build_eks_extended_support_usagetype, build_rds_extended_support_usagetype,
+    build_elasticache_extended_support_usagetype,
+    build_opensearch_extended_support_usagetype, opensearch_nih_factor,
     query_extended_support_price,
 )
 
@@ -412,7 +414,9 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
     es_usagetype = ""
     es_unit = ""
     es_error = ""
-    if es_mode in ("yr1-2", "yr3") and service in ("AmazonEKS", "AmazonRDS"):
+    if es_mode in ("yr1-2", "yr3") and service in (
+        "AmazonEKS", "AmazonRDS", "AmazonElastiCache", "AmazonES"
+    ):
         es_region = item.get("region", "cn-north-1")
         if service in REGION_OVERRIDE:
             es_region = REGION_OVERRIDE[service]
@@ -461,6 +465,52 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
                             es_monthly_total = es_monthly_per_unit * quantity
                         else:
                             es_error = f"missing vcpu (instance_type={instance_type})"
+        elif service == "AmazonElastiCache":
+            # ElastiCache Redis Extended Support：per-node-hour
+            engine = (item.get("engine") or "").strip()
+            if engine and engine.lower() != "redis":
+                es_error = f"engine not eligible ({engine})"
+            elif not instance_type:
+                es_error = "missing instance_type"
+            else:
+                es_usagetype = build_elasticache_extended_support_usagetype(
+                    es_region, es_mode, instance_type
+                )
+                if not es_usagetype:
+                    es_error = f"cannot build usagetype ({instance_type})"
+                else:
+                    es_data = query_extended_support_price(
+                        "AmazonElastiCache", es_region, es_usagetype
+                    )
+                    if not es_data:
+                        es_error = f"price not found ({es_usagetype})"
+                    else:
+                        es_hourly = es_data["price"]
+                        es_unit = es_data.get("unit", "Hrs")
+                        # ElastiCache: per-node per-hour
+                        es_monthly_per_unit = es_hourly * usage_hours
+                        es_monthly_total = es_monthly_per_unit * quantity
+        elif service == "AmazonES":
+            # OpenSearch Extended Support：flat SKU，按 NIH 归一化
+            if not instance_type:
+                es_error = "missing instance_type"
+            else:
+                nih_factor = opensearch_nih_factor(instance_type)
+                if nih_factor <= 0:
+                    es_error = f"unknown instance size (instance_type={instance_type})"
+                else:
+                    es_usagetype = build_opensearch_extended_support_usagetype(es_region)
+                    es_data = query_extended_support_price(
+                        "AmazonES", es_region, es_usagetype
+                    )
+                    if not es_data:
+                        es_error = f"price not found ({es_usagetype})"
+                    else:
+                        es_hourly = es_data["price"]
+                        es_unit = es_data.get("unit", "NIH")
+                        # OpenSearch: price_per_nih × nih_factor × hours
+                        es_monthly_per_unit = es_hourly * nih_factor * usage_hours
+                        es_monthly_total = es_monthly_per_unit * quantity
 
         if es_monthly_total > 0 and include_tax:
             vat_rate = discount_config.get("tax", {}).get("vat_rate", 6) / 100

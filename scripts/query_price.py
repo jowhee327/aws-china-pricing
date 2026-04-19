@@ -264,6 +264,73 @@ def build_rds_extended_support_usagetype(region: str, year: str,
     return f"{prefix}-ExtendedSupport:{year_frag}:{engine_frag}"
 
 
+# ElastiCache ES usagetype 用下划线而非连字符：Yr1_Yr2 / Yr3
+_ELASTICACHE_ES_YEAR_MAP = {
+    "yr1-2": "Yr1_Yr2",
+    "yr3": "Yr3",
+}
+
+
+def build_elasticache_extended_support_usagetype(region: str, year: str,
+                                                 instance_type: str) -> Optional[str]:
+    """构造 ElastiCache Extended Support 的 usagetype。
+
+    示例: CNN1-ExtendedSupportYr1_Yr2-NodeUsage:cache.r6g.large
+    """
+    prefix = REGION_USAGETYPE_PREFIX.get(region, "CNN1")
+    year_frag = _ELASTICACHE_ES_YEAR_MAP.get(year)
+    if not year_frag or not instance_type:
+        return None
+    # ElastiCache usagetype 要求实例类型以 cache. 前缀
+    it = instance_type if instance_type.startswith("cache.") else f"cache.{instance_type}"
+    return f"{prefix}-ExtendedSupport{year_frag}-NodeUsage:{it}"
+
+
+def build_opensearch_extended_support_usagetype(region: str) -> str:
+    """OpenSearch Extended Support 为 flat SKU（不分机型/年限）。
+
+    示例: CNN1-OpenSearchExtendedSupport
+    """
+    prefix = REGION_USAGETYPE_PREFIX.get(region, "CNN1")
+    return f"{prefix}-OpenSearchExtendedSupport"
+
+
+# OpenSearch NIH（Normalized Instance Hour）归一化因子：按 size 计算
+# 基准 large = 4 NIH/hr
+OPENSEARCH_NIH_FACTORS = {
+    "nano": 0.25,
+    "micro": 0.5,
+    "small": 1,
+    "medium": 2,
+    "large": 4,
+    "xlarge": 8,
+    "2xlarge": 16,
+    "4xlarge": 32,
+    "8xlarge": 64,
+    "12xlarge": 96,
+    "16xlarge": 128,
+    "24xlarge": 192,
+}
+
+
+def opensearch_nih_factor(instance_type: str) -> float:
+    """从 OpenSearch 实例类型中提取 NIH 因子。
+
+    支持格式: {family}.{size}.search / {family}.{size}.elasticsearch / {family}.{size}
+    无匹配返回 0。
+    """
+    if not instance_type:
+        return 0
+    parts = instance_type.split(".")
+    # 去掉可能的 .search / .elasticsearch 后缀
+    if parts and parts[-1].lower() in ("search", "elasticsearch"):
+        parts = parts[:-1]
+    if len(parts) < 2:
+        return 0
+    size = parts[-1].lower()
+    return OPENSEARCH_NIH_FACTORS.get(size, 0)
+
+
 def query_extended_support_price(service: str, region: str, usagetype: str) -> Optional[dict]:
     """查询 Extended Support 单价。返回 {"price", "unit", "currency", "usagetype"} 或 None。"""
     filters = {"usagetype": usagetype}
