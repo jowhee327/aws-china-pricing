@@ -224,6 +224,76 @@ def _search_cache_file(cache_file: Path, user_filters: dict, limit: int = 20) ->
 
 # --- Savings Plans 查询 ---
 
+REGION_USAGETYPE_PREFIX = {
+    "cn-north-1": "CNN1",
+    "cn-northwest-1": "CNW1",
+}
+
+# RDS Extended Support 引擎版本 → usagetype 引擎片段
+# 例如 ("MySQL", "5.7") → "MySQL5.7"
+RDS_ES_ENGINE_MAP = {
+    ("MySQL", "5.7"): "MySQL5.7",
+    ("PostgreSQL", "10"): "PostgreSQL10",
+    ("PostgreSQL", "11"): "PostgreSQL11",
+    ("PostgreSQL", "12"): "PostgreSQL12",
+    ("Aurora MySQL", "2"): "AuroraMySQL2",
+    ("Aurora PostgreSQL", "11"): "AuroraPostgreSQL11",
+    ("Aurora PostgreSQL", "12"): "AuroraPostgreSQL12",
+}
+
+# 延长支持年限档位 → usagetype 片段
+ES_YEAR_MAP = {
+    "yr1-2": "Yr1-Yr2",
+    "yr3": "Yr3",
+}
+
+
+def build_eks_extended_support_usagetype(region: str) -> str:
+    prefix = REGION_USAGETYPE_PREFIX.get(region, "CNN1")
+    return f"{prefix}-AmazonEKS-Hours:extendedSupport"
+
+
+def build_rds_extended_support_usagetype(region: str, year: str,
+                                         engine: str, engine_version: str) -> Optional[str]:
+    """构造 RDS Extended Support 的 usagetype。无映射时返回 None。"""
+    prefix = REGION_USAGETYPE_PREFIX.get(region, "CNN1")
+    year_frag = ES_YEAR_MAP.get(year)
+    engine_frag = RDS_ES_ENGINE_MAP.get((engine, engine_version))
+    if not year_frag or not engine_frag:
+        return None
+    return f"{prefix}-ExtendedSupport:{year_frag}:{engine_frag}"
+
+
+def query_extended_support_price(service: str, region: str, usagetype: str) -> Optional[dict]:
+    """查询 Extended Support 单价。返回 {"price", "unit", "currency", "usagetype"} 或 None。"""
+    filters = {"usagetype": usagetype}
+    products = query_api(service, region, filters, max_results=1)
+    if not products:
+        products = query_cache(service, region, filters)
+    if not products:
+        return None
+
+    terms = products[0].get("terms", {}).get("OnDemand", {})
+    for _, term_data in terms.items():
+        for _, dim_data in term_data.get("priceDimensions", {}).items():
+            price_per_unit = dim_data.get("pricePerUnit", {})
+            cny = price_per_unit.get("CNY", price_per_unit.get("USD"))
+            if cny is None:
+                continue
+            try:
+                price = float(cny)
+            except (ValueError, TypeError):
+                continue
+            return {
+                "price": price,
+                "currency": "CNY" if "CNY" in price_per_unit else "USD",
+                "unit": dim_data.get("unit", ""),
+                "description": dim_data.get("description", ""),
+                "usagetype": usagetype,
+            }
+    return None
+
+
 SP_TERM_MAP = {
     "sp-compute-1yr-no": ("ComputeSavingsPlans", "1yr", "No Upfront"),
     "sp-compute-1yr-partial": ("ComputeSavingsPlans", "1yr", "Partial Upfront"),
@@ -597,6 +667,8 @@ def main():
                        help="AWS CLI profile (默认: 不指定则用 AWS CLI 默认配置)")
     parser.add_argument("--filters", "-f", nargs="*", default=[],
                        help="过滤器 key=value 格式 (如 instanceType=c6i.xlarge)")
+    parser.add_argument("--usagetype", "-u", default=None,
+                       help="精确 usagetype 过滤器（如 CNN1-ExtendedSupport:Yr1-Yr2:MySQL5.7）")
     parser.add_argument("--list-services", action="store_true", help="列出所有可用服务")
     parser.add_argument("--compare", "-c", action="store_true", help="显示各计费模式费率对比（含 SP vs RI vs On-Demand）")
     parser.add_argument("--savings-plans", "--sp", action="store_true", help="同时查询 Savings Plans 价格")
@@ -633,6 +705,10 @@ def main():
             user_filters[key] = value
         else:
             print(f"忽略无效过滤器: {f}", file=sys.stderr)
+
+    # --usagetype 精确过滤器
+    if args.usagetype:
+        user_filters["usagetype"] = args.usagetype
 
     # 区域映射：某些服务只在特定区域有价格
     query_region = args.region

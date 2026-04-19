@@ -37,7 +37,7 @@ from pathlib import Path
 # 关键词全部小写，匹配时也先 lower()
 # EC2/RDS/ElastiCache 实例类型正则（识别裸实例名如 m5.large, db.r6g.xlarge, cache.r7g.large）
 EC2_INSTANCE_RE = re.compile(
-    r"^(db\.|cache\.)?[a-z]\d+[a-z]*[gdens]*\.(nano|micro|small|medium|large|xlarge|\d+xlarge|metal)$", re.I
+    r"^(db\.|cache\.)?[a-z]{1,3}\d+[a-z]*\.(nano|micro|small|medium|large|xlarge|\d+xlarge|metal)$", re.I
 )
 
 SERVICE_RULES: list[tuple[list[str], str, dict]] = [
@@ -211,6 +211,77 @@ ENGINE_HINTS = {
     "memcached": ("cacheEngine", "Memcached"),
     "valkey": ("cacheEngine", "Valkey"),
 }
+
+# ── Extended Support 相关 ─────────────────────────────────────────────────
+# 引擎版本检测：(匹配模式正则, engine, engine_version)
+# 匹配 "MySQL 5.7", "mysql5.7", "PostgreSQL 11", "Aurora MySQL 2", "Aurora PG 12" 等
+EXTENDED_SUPPORT_ENGINE_VERSIONS = [
+    (re.compile(r"aurora[\s\-]*mysql[\s\-]*(?:v)?2(?:\.[0-9]+)?\b", re.I), "Aurora MySQL", "2"),
+    (re.compile(r"aurora[\s\-]*(?:postgresql|postgres|pg)[\s\-]*(?:v)?(11|12)(?:\.[0-9]+)?\b", re.I),
+     "Aurora PostgreSQL", None),
+    (re.compile(r"(?<!aurora[\s\-])\bmysql[\s\-]*(?:v)?5\.7\b", re.I), "MySQL", "5.7"),
+    (re.compile(r"(?<!aurora[\s\-])\b(?:postgresql|postgres|psql|pgsql|pg)[\s\-]*(?:v)?(10|11|12)(?:\.[0-9]+)?\b",
+                re.I), "PostgreSQL", None),
+]
+
+# ES 关键词（中文/英文混合）
+EXTENDED_SUPPORT_KEYWORDS = [
+    "延长支持", "扩展支持",
+    "extended support", "ext support", "ext-support",
+]
+
+# Yr3 档位关键词（第3年往往另计价）
+EXTENDED_SUPPORT_YR3_KEYWORDS = [
+    "yr3", "yr-3", "year 3", "年3", "第3年", "第三年", "3年延长支持", "3年扩展支持",
+]
+
+
+def detect_engine_version(text: str) -> tuple[str, str]:
+    """从文本检测 (engine, engine_version)。未命中返回 ("", "")。"""
+    if not text:
+        return "", ""
+    for pattern, engine, fixed_version in EXTENDED_SUPPORT_ENGINE_VERSIONS:
+        m = pattern.search(text)
+        if m:
+            version = fixed_version or m.group(1)
+            return engine, version
+    return "", ""
+
+
+def detect_extended_support(text: str) -> str:
+    """从文本检测 extended_support 字段。返回 '', 'yr1-2' 或 'yr3'。
+
+    规则：
+    - 文本包含 ES 关键词 → 默认 yr1-2
+    - 如同时出现 Yr3 关键词 → yr3
+    """
+    if not text:
+        return ""
+    text_lower = text.lower()
+    has_es = any(kw in text_lower for kw in EXTENDED_SUPPORT_KEYWORDS)
+    has_es_abbrev = bool(re.search(r'\b(es|ext)\b', text_lower))
+    # 缩写 ES/EXT 仅在上下文中含 support/延长/扩展 才算
+    if has_es_abbrev and not has_es:
+        if any(k in text_lower for k in ["support", "延长", "扩展"]):
+            has_es = True
+    if not has_es:
+        return ""
+    if any(kw in text_lower for kw in EXTENDED_SUPPORT_YR3_KEYWORDS):
+        return "yr3"
+    return "yr1-2"
+
+
+# 需要 Extended Support 提醒的旧引擎版本（engine, version）
+LEGACY_ENGINE_VERSIONS = {
+    ("MySQL", "5.7"),
+    ("PostgreSQL", "10"),
+    ("PostgreSQL", "11"),
+    ("PostgreSQL", "12"),
+    ("Aurora MySQL", "2"),
+    ("Aurora PostgreSQL", "11"),
+    ("Aurora PostgreSQL", "12"),
+}
+
 
 # EBS 卷类型提示词
 EBS_VOLUME_HINTS: list[tuple[list[str], str]] = [
@@ -438,6 +509,10 @@ COLUMN_ALIASES = {
     "region": "region", "区域": "region",
     "os": "os", "操作系统": "os",
     "engine": "engine", "引擎": "engine",
+    "engine_version": "engine_version", "版本": "engine_version",
+    "引擎版本": "engine_version", "db_version": "engine_version",
+    "extended_support": "extended_support", "延长支持": "extended_support",
+    "扩展支持": "extended_support", "es_support": "extended_support",
     "storage_gb": "storage_gb", "存储": "storage_gb",
     "billing_mode": "billing_mode", "计费模式": "billing_mode",
     "usage_hours": "usage_hours", "使用时长": "usage_hours",
@@ -446,8 +521,9 @@ COLUMN_ALIASES = {
 # 标准输出列
 OUTPUT_FIELDS = [
     "sheet_name", "service", "instance_type", "region", "quantity", "usage_hours",
-    "os", "engine", "storage_gb", "billing_mode", "productFamily", "volumeApiName",
-    "storageClass", "notes", "original_request", "section",
+    "os", "engine", "engine_version", "storage_gb", "billing_mode", "productFamily",
+    "volumeApiName", "storageClass", "extended_support", "notes", "original_request",
+    "section",
 ]
 
 
@@ -1075,6 +1151,29 @@ def build_item(row_values: list, column_roles: dict[int, str],
               or engine_info.get("cacheEngine", "")
               or extra_fields.get("engine", ""))
 
+    # ── Extended Support 检测 (仅 EKS/RDS) ──
+    extended_support = ""
+    engine_version = ""
+    es_text = " ".join(filter(None, [
+        service_text, spec_text, description_text, business_text
+    ]))
+    if service_code in ("AmazonEKS", "AmazonRDS"):
+        extended_support = detect_extended_support(es_text)
+
+        if service_code == "AmazonRDS":
+            detected_engine, detected_version = detect_engine_version(es_text)
+            if detected_engine:
+                engine_version = detected_version
+                # 如果检测到引擎但现有 engine 为空或不一致，采用检测结果
+                if not engine or engine.lower() != detected_engine.lower():
+                    engine = detected_engine
+                # 识别到旧版本但未显式标 ES：给 warning
+                if not extended_support and (detected_engine, detected_version) in LEGACY_ENGINE_VERSIONS:
+                    notes_parts.append(
+                        f"⚠️ 检测到旧版本 {detected_engine} {detected_version}，"
+                        "可能需要 Extended Support 附加费用（extended_support=yr1-2 或 yr3）"
+                    )
+
     # 设置 usage_hours 值
     usage_hours_value = "720"  # 默认值
 
@@ -1110,8 +1209,10 @@ def build_item(row_values: list, column_roles: dict[int, str],
         "usage_hours": usage_hours_value,
         "os": "Linux" if service_code == "AmazonEC2" else "",
         "engine": engine,
+        "engine_version": engine_version,
         "storage_gb": str(spec_info["storage_gb"]) if spec_info.get("storage_gb") else "",
         "billing_mode": item_billing_mode,
+        "extended_support": extended_support,
         "notes": "; ".join(notes_parts) if notes_parts else "",
         "original_request": original_request,
         "section": section,
@@ -1291,6 +1392,34 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
                 else:
                     notes_value = note
 
+        # ── Extended Support 检测（CSV 已知服务路径）──
+        es_text_csv = " ".join(filter(None, [
+            orig_spec, notes_value, norm.get("notes", ""),
+            norm.get("engine_version", ""), norm.get("extended_support", "")
+        ]))
+        es_value = norm.get("extended_support", "").strip().lower()
+        if es_value in ("yr1-2", "yr1-yr2", "ext-yr1-2", "extended-support-yr1"):
+            es_value = "yr1-2"
+        elif es_value in ("yr3", "ext-yr3", "extended-support-yr3"):
+            es_value = "yr3"
+        else:
+            es_value = ""
+        if not es_value and orig_svc in ("AmazonEKS", "AmazonRDS"):
+            es_value = detect_extended_support(es_text_csv)
+
+        engine_version_csv = norm.get("engine_version", "")
+        if orig_svc == "AmazonRDS":
+            if not engine_version_csv:
+                det_engine, det_version = detect_engine_version(es_text_csv)
+                if det_engine:
+                    engine_version_csv = det_version
+            if not es_value and engine_version_csv:
+                eng = norm.get("engine", "")
+                if (eng, engine_version_csv) in LEGACY_ENGINE_VERSIONS:
+                    warn = (f"⚠️ 检测到旧版本 {eng} {engine_version_csv}，"
+                            "可能需要 Extended Support 附加费用")
+                    notes_value = f"{warn}; {notes_value}" if notes_value else warn
+
         result = {
             "sheet_name": "",
             "service": orig_svc,
@@ -1300,8 +1429,10 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
             "usage_hours": usage_hours_value,
             "os": norm.get("os", ""),
             "engine": norm.get("engine", ""),
+            "engine_version": engine_version_csv,
             "storage_gb": norm.get("storage_gb", ""),
             "billing_mode": norm.get("billing_mode", item_billing_mode),
+            "extended_support": es_value,
             "notes": notes_value,
             "original_request": original_request,
             "section": "",
@@ -1386,6 +1517,39 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
             else:
                 csv_notes = note
 
+    # ── Extended Support 检测（CSV 智能匹配路径）──
+    es_text_csv2 = " ".join(filter(None, [
+        svc_text, extra_text, norm.get("engine_version", ""),
+        norm.get("extended_support", "")
+    ]))
+    es_value2 = norm.get("extended_support", "").strip().lower()
+    if es_value2 in ("yr1-2", "yr1-yr2", "ext-yr1-2", "extended-support-yr1"):
+        es_value2 = "yr1-2"
+    elif es_value2 in ("yr3", "ext-yr3", "extended-support-yr3"):
+        es_value2 = "yr3"
+    else:
+        es_value2 = ""
+    if not es_value2 and service_code in ("AmazonEKS", "AmazonRDS"):
+        es_value2 = detect_extended_support(es_text_csv2)
+
+    engine_version_csv2 = norm.get("engine_version", "")
+    detected_engine2 = ""
+    if service_code == "AmazonRDS":
+        det_engine, det_version = detect_engine_version(es_text_csv2)
+        if det_engine:
+            detected_engine2 = det_engine
+            if not engine_version_csv2:
+                engine_version_csv2 = det_version
+        if not es_value2 and engine_version_csv2:
+            eng_check = norm.get("engine", "") or engine_info.get("engine", "") or detected_engine2
+            if (eng_check, engine_version_csv2) in LEGACY_ENGINE_VERSIONS:
+                warn = (f"⚠️ 检测到旧版本 {eng_check} {engine_version_csv2}，"
+                        "可能需要 Extended Support 附加费用")
+                csv_notes = f"{warn}; {csv_notes}" if csv_notes else warn
+
+    final_engine = (norm.get("engine", "") or engine_info.get("engine", "")
+                    or detected_engine2)
+
     result = {
         "sheet_name": "",
         "service": service_code,
@@ -1394,9 +1558,11 @@ def process_csv_row(row: dict, region: str, billing_mode: str = "on-demand") -> 
         "quantity": norm.get("quantity", "1") or "1",
         "usage_hours": usage_hours_value,
         "os": norm.get("os", "Linux") if service_code == "AmazonEC2" else norm.get("os", ""),
-        "engine": norm.get("engine", "") or engine_info.get("engine", ""),
+        "engine": final_engine,
+        "engine_version": engine_version_csv2,
         "storage_gb": norm.get("storage_gb", ""),
         "billing_mode": norm.get("billing_mode", item_billing_mode),
+        "extended_support": es_value2,
         "notes": csv_notes,
         "original_request": original_request,
         "section": "",
@@ -1858,12 +2024,19 @@ def _output_excel(items: list[dict], args):
     # 打印摘要
     total_monthly = sum(r.get("monthly_total", 0) for r in results)
     total_yearly = sum(r.get("yearly_total", 0) for r in results)
+    total_es_monthly = sum(r.get("extended_support_monthly_total", 0) or 0 for r in results)
+    total_es_yearly = sum(r.get("extended_support_yearly_total", 0) or 0 for r in results)
     tax_label = "（含税）" if args.include_tax else "（不含税）"
     print(f"\n[OK] 报价单已生成: {args.output}", file=sys.stderr)
     print(f"\n摘要{tax_label}:", file=sys.stderr)
     print(f"  条目数: {len(results)}", file=sys.stderr)
     print(f"  月费用合计: CNY {total_monthly:,.2f}", file=sys.stderr)
     print(f"  年费用合计: CNY {total_yearly:,.2f}", file=sys.stderr)
+    if total_es_monthly > 0:
+        print(f"  Extended Support 月费: CNY {total_es_monthly:,.2f}", file=sys.stderr)
+        print(f"  Extended Support 年费: CNY {total_es_yearly:,.2f}", file=sys.stderr)
+        print(f"  总计（含 ES）月费: CNY {total_monthly + total_es_monthly:,.2f}", file=sys.stderr)
+        print(f"  总计（含 ES）年费: CNY {total_yearly + total_es_yearly:,.2f}", file=sys.stderr)
 
 
 def main():

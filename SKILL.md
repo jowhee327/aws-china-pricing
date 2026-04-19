@@ -215,7 +215,46 @@ python3 scripts/smart_import.py --input workload.xlsx -r cn-north-1 -b ri-3y-par
 
 > **重要**：这是默认且唯一推荐的报价方式。不要分步调用 calculate_cost.py 或 generate_quote.py。
 
-### 5. 更新价格数据缓存
+### 5. Extended Support（延长支持）附加费用
+
+中国区 RDS 和 EKS 支持延长支持费用（在 on-demand/RI/SP 之外叠加）。
+
+**支持的档位**：
+- `yr1-2`（Yr1-Yr2，第 1-2 年延长支持）
+- `yr3`（Yr3，第 3 年延长支持，单价通常翻倍）
+
+**EKS 计费**：¥3.44/hr/cluster（¥0.60/hr 标准费用之外的附加费）
+- usagetype: `CNN1-AmazonEKS-Hours:extendedSupport`（北京）/ `CNW1-AmazonEKS-Hours:extendedSupport`（宁夏）
+
+**RDS 计费**：按 vCPU × 小时计价
+- 支持引擎版本：MySQL 5.7、PostgreSQL 10/11/12、Aurora MySQL 2、Aurora PostgreSQL 11/12
+- Yr1-Yr2: ¥0.974/vCPU-hr；Yr3: ¥1.948/vCPU-hr
+- usagetype 形如: `CNN1-ExtendedSupport:Yr1-Yr2:MySQL5.7`、`CNN1-ExtendedSupport:Yr3:PostgreSQL11`
+
+**智能导入自动识别**：
+- 关键词：`延长支持`、`扩展支持`、`Extended Support`、`Ext Support`
+- 档位关键词：`Yr3`、`第3年`、`年3` → 自动设为 yr3；默认 yr1-2
+- 引擎版本：自动识别 `MySQL 5.7`、`PostgreSQL 11`、`Aurora PG 12` 等格式
+- 如果检测到旧版本但未显式标注 ES，会给出 warning 提示
+
+**CSV/Excel 列支持**：
+- 新增列：`extended_support`（取值 `yr1-2` 或 `yr3`）、`engine_version`（如 `5.7`、`11`、`12`）
+- 兼容中文列名：`延长支持`、`扩展支持`、`引擎版本`、`版本`
+
+**直接查询 ES 价格**：
+```bash
+# 查 MySQL 5.7 Yr1-Yr2 延长支持单价
+python3 scripts/query_price.py --service AmazonRDS --region cn-north-1 \
+  --usagetype "CNN1-ExtendedSupport:Yr1-Yr2:MySQL5.7"
+
+# 查 EKS 延长支持单价
+python3 scripts/query_price.py --service AmazonEKS --region cn-north-1 \
+  --usagetype "CNN1-AmazonEKS-Hours:extendedSupport"
+```
+
+**报价单输出**：ES 作为独立的明细行列出（服务名显示 `XXX Extended Support (Yr1-Yr2/Yr3)`）。
+
+### 6. 更新价格数据缓存
 
 ```bash
 # 更新所有服务（含 Savings Plans）

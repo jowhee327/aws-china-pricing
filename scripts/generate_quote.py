@@ -412,6 +412,43 @@ def _write_quote_sheet(ws, sheet_results: list[dict], config: dict, sheet_title:
 
         current_row += 1
 
+        # ── Extended Support 附加行 ──
+        es_monthly = r.get("extended_support_monthly_total", 0) or 0
+        if es_monthly > 0:
+            es_row = current_row
+            idx += 1
+            es_mode_label = {"yr1-2": "Yr1-Yr2", "yr3": "Yr3"}.get(
+                r.get("extended_support", ""), r.get("extended_support", "")
+            )
+            es_service_name = f"{service_name} Extended Support ({es_mode_label})"
+            es_hourly = r.get("extended_support_hourly", 0)
+            es_yearly = r.get("extended_support_yearly_total", es_monthly * 12)
+            if include_tax:
+                es_hourly = round(es_hourly * 1.06, 6)
+            es_unit_note = r.get("extended_support_unit", "")
+            es_notes = r.get("extended_support_usagetype", "")
+            if es_unit_note:
+                es_notes = f"{es_notes} | 单价单位: {es_unit_note}"
+
+            es_values = [
+                idx,
+                es_service_name,
+                r.get("instance_type", ""),
+                region_name,
+                int(r.get("quantity", 1) or 1),
+                float(r.get("usage_hours", 720) or 720),
+                "按需 (附加费)",
+                float(es_hourly or 0),
+                float(es_monthly),
+                float(es_monthly),
+                float(es_yearly),
+                0,
+                es_notes,
+                "",
+            ]
+            write_data_row(ws, es_row, es_values, fmt)
+            current_row += 1
+
     # 合计行用 SUM 公式
     total_row = current_row
     total_values = [
@@ -564,10 +601,15 @@ def main():
     # 打印摘要
     total_monthly = sum(r.get("monthly_total", 0) for r in results)
     total_yearly = sum(r.get("yearly_total", 0) for r in results)
+    total_es_monthly = sum(r.get("extended_support_monthly_total", 0) or 0 for r in results)
+    total_es_yearly = sum(r.get("extended_support_yearly_total", 0) or 0 for r in results)
     tax_label = "（含税）" if args.include_tax else "（不含税）"
     print(f"\n摘要{tax_label}:", file=sys.stderr)
     print(f"  月费用合计: CNY {total_monthly:,.2f}", file=sys.stderr)
     print(f"  年费用合计: CNY {total_yearly:,.2f}", file=sys.stderr)
+    if total_es_monthly > 0:
+        print(f"  Extended Support 月费: CNY {total_es_monthly:,.2f}", file=sys.stderr)
+        print(f"  总计（含 ES）月费: CNY {total_monthly + total_es_monthly:,.2f}", file=sys.stderr)
     if args.customer:
         print(f"  客户: {args.customer}", file=sys.stderr)
 

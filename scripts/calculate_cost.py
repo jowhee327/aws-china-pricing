@@ -28,6 +28,8 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from query_price import (
     query_api, query_cache, extract_pricing,
     RI_TERM_MAP, SP_TERM_MAP, REGION_OVERRIDE, query_savings_plans,
+    build_eks_extended_support_usagetype, build_rds_extended_support_usagetype,
+    query_extended_support_price,
 )
 
 
@@ -335,6 +337,54 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
         monthly_total *= (1 + vat_rate)
         upfront_total *= (1 + vat_rate)
 
+    # ── Extended Support 附加费用 ──
+    es_mode = (item.get("extended_support") or "").strip().lower()
+    es_monthly_total = 0.0
+    es_hourly = 0.0
+    es_usagetype = ""
+    es_unit = ""
+    if es_mode in ("yr1-2", "yr3") and service in ("AmazonEKS", "AmazonRDS"):
+        es_region = item.get("region", "cn-north-1")
+        if service in REGION_OVERRIDE:
+            es_region = REGION_OVERRIDE[service]
+
+        if service == "AmazonEKS":
+            es_usagetype = build_eks_extended_support_usagetype(es_region)
+            es_data = query_extended_support_price("AmazonEKS", es_region, es_usagetype)
+            if es_data:
+                es_hourly = es_data["price"]
+                es_unit = es_data.get("unit", "Hours")
+                # EKS: per cluster per hour
+                es_monthly_per_unit = es_hourly * usage_hours
+                es_monthly_total = es_monthly_per_unit * quantity
+        elif service == "AmazonRDS":
+            engine = item.get("engine", "")
+            engine_version = item.get("engine_version", "")
+            es_usagetype = build_rds_extended_support_usagetype(
+                es_region, es_mode, engine, engine_version
+            )
+            if es_usagetype:
+                es_data = query_extended_support_price("AmazonRDS", es_region, es_usagetype)
+                if es_data:
+                    es_hourly = es_data["price"]
+                    es_unit = es_data.get("unit", "vCPU-hour")
+                    # RDS: per vCPU per hour
+                    vcpu_attr = price_data.get("attributes", {}).get("vcpu", "")
+                    try:
+                        vcpu = int(vcpu_attr) if vcpu_attr else 0
+                    except (ValueError, TypeError):
+                        vcpu = 0
+                    if vcpu > 0:
+                        es_monthly_per_unit = es_hourly * usage_hours * vcpu
+                        es_monthly_total = es_monthly_per_unit * quantity
+                    else:
+                        print(f"[WARN] RDS Extended Support: 无法从价格数据获取 vCPU 数，"
+                              f"ES 附加费跳过 ({instance_type})", file=sys.stderr)
+
+        if es_monthly_total > 0 and include_tax:
+            vat_rate = discount_config.get("tax", {}).get("vat_rate", 6) / 100
+            es_monthly_total *= (1 + vat_rate)
+
     result.update({
         "hourly_list": hourly,
         "hourly_after_discount": hourly_after_discount,
@@ -344,6 +394,12 @@ def calculate_item_cost(item: dict, price_data: dict, discount_config: dict,
         "yearly_total": round(monthly_total * 12, 2),
         "applied_discounts": applied_discounts,
         "include_tax": include_tax,
+        "extended_support": es_mode,
+        "extended_support_hourly": round(es_hourly, 6) if es_hourly else 0,
+        "extended_support_usagetype": es_usagetype,
+        "extended_support_unit": es_unit,
+        "extended_support_monthly_total": round(es_monthly_total, 2),
+        "extended_support_yearly_total": round(es_monthly_total * 12, 2),
     })
 
     return result
@@ -359,6 +415,8 @@ def format_results(results: list[dict]) -> str:
     total_monthly = 0
     total_yearly = 0
     total_upfront = 0
+    total_es_monthly = 0
+    total_es_yearly = 0
     currency = "CNY"
 
     for r in results:
@@ -379,11 +437,38 @@ def format_results(results: list[dict]) -> str:
         total_yearly += r["yearly_total"]
         total_upfront += r.get("upfront_total", 0)
 
+        # Extended Support 单独一行
+        es_monthly = r.get("extended_support_monthly_total", 0) or 0
+        if es_monthly > 0:
+            es_label = f"{r['service']} Extended Support ({r.get('extended_support', '')})"
+            es_yearly = r.get("extended_support_yearly_total", es_monthly * 12)
+            lines.append(
+                f"  ↳ {es_label:<55} "
+                f"{currency} {r.get('extended_support_hourly', 0):>8.4f} "
+                f"{'':<14} "
+                f"{currency} {es_monthly:>10,.2f} "
+                f"{currency} {es_yearly:>10,.2f}"
+            )
+            total_es_monthly += es_monthly
+            total_es_yearly += es_yearly
+
     lines.append("=" * 170)
     lines.append(f"{'合计':<15} {'':<18} {'':<16} {'':<4} {'':<30} "
                  f"{'':>12} {'':<14} "
                  f"{currency} {total_monthly:>10,.2f} "
                  f"{currency} {total_yearly:>10,.2f}")
+
+    if total_es_monthly > 0:
+        lines.append(f"{'Extended Support 合计':<15} {'':<18} {'':<16} {'':<4} {'':<30} "
+                     f"{'':>12} {'':<14} "
+                     f"{currency} {total_es_monthly:>10,.2f} "
+                     f"{currency} {total_es_yearly:>10,.2f}")
+        grand_monthly = total_monthly + total_es_monthly
+        grand_yearly = total_yearly + total_es_yearly
+        lines.append(f"{'总计（含ES）':<15} {'':<18} {'':<16} {'':<4} {'':<30} "
+                     f"{'':>12} {'':<14} "
+                     f"{currency} {grand_monthly:>10,.2f} "
+                     f"{currency} {grand_yearly:>10,.2f}")
 
     if total_upfront > 0:
         lines.append(f"\n预付总额: {currency} {total_upfront:,.2f}")
@@ -408,6 +493,8 @@ def save_csv(results: list[dict], output_path: str):
         "sheet_name", "service", "instance_type", "region", "quantity", "usage_hours",
         "billing_mode", "currency", "hourly_list", "hourly_after_discount",
         "monthly_per_unit", "monthly_total", "upfront_total", "yearly_total",
+        "extended_support", "extended_support_hourly", "extended_support_usagetype",
+        "extended_support_monthly_total", "extended_support_yearly_total",
         "applied_discounts", "notes", "original_request", "section", "warning",
     ]
 
