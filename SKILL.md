@@ -1,6 +1,6 @@
 ---
 name: aws-china-pricing
-description: AWS 中国区定价查询、成本计算、报价生成、实例推荐工具，支持 87 个服务、Savings Plans/RI/On-Demand 对比、数据传输费计算、EDP/PPA 折扣和 Excel 报价单输出。触发词：AWS 中国区价格、EC2 实例价格、成本估算、报价单、Savings Plans、预留实例、数据传输费、实例推荐、性价比
+description: AWS 中国区定价查询、成本计算、报价生成、实例推荐工具，支持 87 个服务、Savings Plans/RI/On-Demand 对比、数据传输费计算、EDP/PPA 折扣、EKS/RDS/ElastiCache/OpenSearch Extended Support 延长支持附加费，以及 Excel 报价单输出。触发词：AWS 中国区价格、EC2 实例价格、成本估算、报价单、Savings Plans、预留实例、数据传输费、实例推荐、性价比、Extended Support、延长支持、扩展支持
 ---
 
 # ⚠️ **CRITICAL - MANDATORY RULES FOR AI AGENTS** ⚠️
@@ -217,11 +217,12 @@ python3 scripts/smart_import.py --input workload.xlsx -r cn-north-1 -b ri-3y-par
 
 ### 5. Extended Support（延长支持）附加费用
 
-中国区 RDS 和 EKS 支持延长支持费用（在 on-demand/RI/SP 之外叠加）。
+中国区 **EKS / RDS / ElastiCache / OpenSearch** 四个服务支持延长支持费用（在 on-demand/RI/SP 之外叠加）。
 
 **支持的档位**：
 - `yr1-2`（Yr1-Yr2，第 1-2 年延长支持）
 - `yr3`（Yr3，第 3 年延长支持，单价通常翻倍）
+- OpenSearch 为 flat 单价，不分年限档位
 
 **EKS 计费**：¥3.44/hr/cluster（¥0.60/hr 标准费用之外的附加费）
 - usagetype: `CNN1-AmazonEKS-Hours:extendedSupport`（北京）/ `CNW1-AmazonEKS-Hours:extendedSupport`（宁夏）
@@ -231,14 +232,25 @@ python3 scripts/smart_import.py --input workload.xlsx -r cn-north-1 -b ri-3y-par
 - Yr1-Yr2: ¥0.974/vCPU-hr；Yr3: ¥1.948/vCPU-hr
 - usagetype 形如: `CNN1-ExtendedSupport:Yr1-Yr2:MySQL5.7`、`CNN1-ExtendedSupport:Yr3:PostgreSQL11`
 
+**ElastiCache 计费**（v1.10 新增）：按 per-node-hour 计价
+- 支持引擎：Redis（仅 6.x/5.x 等旧版本；Memcached/Valkey 不适用会被阻断）
+- Yr1-Yr2 示例：`cache.r6g.large` = ¥1.584/hr；Yr3 单价 = Yr1-Yr2 × 2
+- CNN1（北京）128 个 SKU + CNW1（宁夏）108 个 SKU 全覆盖
+- usagetype 形如: `CNN1-NodeUsage:cache.r6g.large:extendedSupport-yr1-2`
+
+**OpenSearch 计费**（v1.10 新增）：按 NIH（Normalized Instance Hour）× 小时计价
+- 北京 ¥0.0603/NIH，宁夏 ¥0.0432/NIH（flat 单价）
+- NIH 归一化：large=4、xlarge=8、2xlarge=16、4xlarge=32 …
+- 支持 `.search` / `.elasticsearch` 后缀，裸名（如 `r5.large`）自动补全
+
 **智能导入自动识别**：
 - 关键词：`延长支持`、`扩展支持`、`Extended Support`、`Ext Support`
 - 档位关键词：`Yr3`、`第3年`、`年3` → 自动设为 yr3；默认 yr1-2
-- 引擎版本：自动识别 `MySQL 5.7`、`PostgreSQL 11`、`Aurora PG 12` 等格式
+- 引擎版本：自动识别 `MySQL 5.7`、`PostgreSQL 11`、`Aurora PG 12`、`Redis 6.x` 等格式
 - 如果检测到旧版本但未显式标注 ES，会给出 warning 提示
 
 **CSV/Excel 列支持**：
-- 新增列：`extended_support`（取值 `yr1-2` 或 `yr3`）、`engine_version`（如 `5.7`、`11`、`12`）
+- 新增列：`extended_support`（取值 `yr1-2` 或 `yr3`）、`engine_version`（如 `5.7`、`11`、`12`、`6.x`）、`deployment_option`（RDS Single-AZ / Multi-AZ，默认 Single-AZ）
 - 兼容中文列名：`延长支持`、`扩展支持`、`引擎版本`、`版本`
 
 **直接查询 ES 价格**：
@@ -250,9 +262,13 @@ python3 scripts/query_price.py --service AmazonRDS --region cn-north-1 \
 # 查 EKS 延长支持单价
 python3 scripts/query_price.py --service AmazonEKS --region cn-north-1 \
   --usagetype "CNN1-AmazonEKS-Hours:extendedSupport"
+
+# 查 ElastiCache Redis 延长支持单价
+python3 scripts/query_price.py --service AmazonElastiCache --region cn-north-1 \
+  --usagetype "CNN1-NodeUsage:cache.r6g.large:extendedSupport-yr1-2"
 ```
 
-**报价单输出**：ES 作为独立的明细行列出（服务名显示 `XXX Extended Support (Yr1-Yr2/Yr3)`）。
+**报价单输出**：ES 作为独立的明细行列出（服务名显示 `XXX Extended Support (Yr1-Yr2/Yr3)`），数量/时长变动时金额通过 Excel 公式（`=H*F`）自动联动。ES 查价独立于基础实例查价 —— 即使基础价查不到，ES 附加费也不会被静默丢失。
 
 ### 6. 更新价格数据缓存
 

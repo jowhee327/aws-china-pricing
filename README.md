@@ -9,6 +9,7 @@
 - **智能导入** — 任意格式 Excel/CSV 自动识别
 - **实时价格查询** — 87 个服务
 - **RI/SP 支持** — Standard/Convertible RI + Compute/Instance SP
+- **Extended Support 延长支持** — EKS / RDS / ElastiCache / OpenSearch 共 4 个服务的 ES 附加费自动计算
 - **折扣支持** — EDP/PPA
 - **Excel 报价单生成**
 - **实例推荐**
@@ -172,6 +173,59 @@ AmazonEC2,cn-north-1,,,,1,,on-demand,,,,,out_to_internet,5000,"出公网 5TB"
 
 
 
+## Extended Support（延长支持）
+
+中国区 **EKS / RDS / ElastiCache / OpenSearch** 四个服务支持 Extended Support 延长支持附加费，在 on-demand/RI/SP 单价基础上叠加。
+
+### 覆盖服务
+
+| 服务 | 计费维度 | Yr1-Yr2 单价（北京示例） | Yr3 单价 |
+|------|----------|---------------------------|----------|
+| EKS | cluster-hour | ¥3.44/hr/cluster | ¥3.44/hr/cluster |
+| RDS | vCPU × hour | ¥0.974/vCPU-hr | ¥1.948/vCPU-hr（× 2）|
+| ElastiCache | node × hour | cache.r6g.large ¥1.584/hr | Yr1-Yr2 × 2 |
+| OpenSearch | NIH × hour（flat，无年限分档）| 北京 ¥0.0603/NIH，宁夏 ¥0.0432/NIH | — |
+
+### 支持的引擎/版本
+
+- **RDS**：MySQL 5.7、PostgreSQL 10/11/12、Aurora MySQL 2、Aurora PostgreSQL 11/12
+- **ElastiCache**：Redis 6.x / 5.x 等旧版本（Memcached、Valkey 会自动识别并阻断 ES 附加费）
+- **OpenSearch**：支持 `.search` 和 `.elasticsearch` 后缀，裸名（如 `r5.large`）自动补全
+
+### CSV/Excel 触发方式
+
+新增以下列即可自动计算 ES 附加费：
+
+| 列名 | 取值 | 说明 |
+|------|------|------|
+| `extended_support` | `yr1-2` / `yr3` | 延长支持档位；OpenSearch 忽略档位 |
+| `engine_version` | `5.7` / `11` / `12` / `6.x` 等 | 引擎版本，用于匹配 ES SKU |
+| `deployment_option` | `Single-AZ`（默认） / `Multi-AZ` | RDS 专用 |
+
+兼容的中文列名：`延长支持`、`扩展支持`、`引擎版本`、`版本`。
+
+示例：
+
+```csv
+service,region,instance_type,engine,engine_version,extended_support,quantity,hours_per_month,billing_mode
+AmazonRDS,cn-north-1,db.r6g.xlarge,MySQL,5.7,yr1-2,2,730,on-demand
+AmazonElastiCache,cn-north-1,cache.r6g.large,Redis,6.x,yr1-2,3,730,on-demand
+AmazonEKS,cn-north-1,,,,yr1-2,1,730,on-demand
+AmazonOpenSearchService,cn-north-1,r5.xlarge.search,,,yr1-2,2,730,on-demand
+```
+
+### 智能识别
+
+`smart_import.py` 会根据关键词自动识别 ES：
+
+- 关键词：`延长支持`、`扩展支持`、`Extended Support`、`Ext Support`
+- 档位：`Yr3`、`第3年` → `yr3`；默认 `yr1-2`
+- 如检测到旧引擎版本（如 MySQL 5.7）但未标注 ES，会输出 warning 提示
+
+### 报价单输出
+
+ES 作为独立的明细行列出（服务名显示 `XXX Extended Support (Yr1-Yr2/Yr3)`），并使用 Excel 公式 `=H*F` 让金额随数量/时长自动联动。ES 查价独立于基础实例查价 —— 即使基础价查不到，ES 附加费也不会被静默丢失。
+
 ## 折扣配置
 
 编辑 `discount-config.yaml`：
@@ -260,6 +314,27 @@ aws-china-pricing/
 | cn-north-1 | 北京区 | 光环新网 (Sinnet) |
 | cn-northwest-1 | 宁夏区 | 西云数据 (NWCD) |
 | cn-north-1-pkx-1 | Auto Cloud Local Zone | — |
+
+
+## Changelog
+
+### v1.10.1（修复）
+- ES 查价独立于基础实例查价：基础价查不到时，ES 附加费不再静默丢失
+- 报价单 ES 行金额列改为 Excel 公式 `=H*F`，数量/时长变动自动联动
+
+### v1.10（ElastiCache + OpenSearch Extended Support）
+- **ElastiCache Extended Support**：Redis 6.x/5.x 等旧版本，按 per-node-hour 计费；Yr1-Yr2 / Yr3（Yr3 = Yr1-Yr2 × 2）；CNN1 128 个 SKU + CNW1 108 个 SKU 全覆盖；Memcached / Valkey 自动识别并阻断 ES
+- **OpenSearch Extended Support**：flat SKU（无年限分档），北京 ¥0.0603/NIH、宁夏 ¥0.0432/NIH；NIH 归一化（large=4、xlarge=8、2xlarge=16…）；支持 `.search`/`.elasticsearch` 后缀，裸名自动补全
+
+### v1.9（EKS + RDS Extended Support）
+- **EKS Extended Support**：¥3.44/cluster-hr
+- **RDS Extended Support**：按 vCPU × hr 计费；两档 Yr1-Yr2 / Yr3；支持 MySQL 5.7、PostgreSQL 10/11/12、Aurora MySQL 2、Aurora PG 11/12
+- 自动检测旧引擎版本并 warn（例如 MySQL 5.7）
+- CSV 新增字段：`extended_support`（none / yr1-2 / yr3）、`engine_version`、`deployment_option`
+- RDS `deployment_option` 默认 Single-AZ，可通过字段覆盖为 Multi-AZ
+
+### v1.8.5
+- 支持裸实例类型名自动识别（如 `r6g.large`、`m5.large`，不带 `db.` / `cache.` 前缀也能匹配）
 
 
 ## 许可证
